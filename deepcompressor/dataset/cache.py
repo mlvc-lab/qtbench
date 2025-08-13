@@ -16,7 +16,7 @@ import torch.utils.hooks
 from tqdm import tqdm
 
 from ..data.cache import IOTensorsCache, ModuleForwardInput, TensorCache
-from ..data.utils.reshape import ConvInputReshapeFn, ConvOutputReshapedFn, LinearReshapeFn
+from ..data.utils.reshape import ConvInputReshapeFn, ConvOutputReshapedFn, LinearInputReshapeFn
 from ..utils import tools
 from ..utils.common import tree_copy_with_ref, tree_map
 from ..utils.hooks import EarlyStopException, EarlyStopHook, Hook
@@ -68,8 +68,8 @@ class BaseCalibCacheLoader(ABC):
         """
         if isinstance(module, (nn.Linear,)):
             return IOTensorsCache(
-                inputs=TensorCache(channels_dim=-1, reshape=LinearReshapeFn()),
-                outputs=TensorCache(channels_dim=-1, reshape=LinearReshapeFn()),
+                inputs=TensorCache(channels_dim=-1, reshape=LinearInputReshapeFn()),
+                outputs=TensorCache(channels_dim=-1, reshape=LinearInputReshapeFn()),
             )
         elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
             assert module.padding_mode == "zeros", f"Padding mode {module.padding_mode} is not supported"

@@ -11,19 +11,11 @@ import torch.nn as nn
 import torch.utils.data
 from diffusers.models.attention import JointTransformerBlock
 from diffusers.models.attention_processor import Attention
-from diffusers.models.transformers.transformer_flux import (
-    FluxSingleTransformerBlock,
-    FluxTransformerBlock,
-)
+from diffusers.models.transformers.transformer_flux import FluxSingleTransformerBlock, FluxTransformerBlock
 from omniconfig import configclass
 
-from deepcompressor.data.cache import (
-    IOTensorsCache,
-    ModuleForwardInput,
-    TensorCache,
-    TensorsCache,
-)
-from deepcompressor.data.utils.reshape import AttentionInputReshapeFn, LinearReshapeFn
+from deepcompressor.data.cache import IOTensorsCache, ModuleForwardInput, TensorCache, TensorsCache
+from deepcompressor.data.utils.reshape import AttnInputReshapeFn, LinearInputReshapeFn
 from deepcompressor.dataset.action import CacheAction, ConcatCacheAction
 from deepcompressor.dataset.cache import BaseCalibCacheLoader
 from deepcompressor.dataset.config import BaseDataLoaderConfig
@@ -116,9 +108,9 @@ class DiffusionConcatCacheAction(ConcatCacheAction):
                 if encoder_hidden_states_cache.channels_dim is None:
                     encoder_hidden_states_cache.channels_dim = encoder_channels_dim
                     if encoder_channels_dim == -1:
-                        encoder_hidden_states_cache.reshape = LinearReshapeFn()
+                        encoder_hidden_states_cache.reshape = LinearInputReshapeFn()
                     else:
-                        encoder_hidden_states_cache.reshape = AttentionInputReshapeFn(encoder_channels_dim)
+                        encoder_hidden_states_cache.reshape = AttnInputReshapeFn(encoder_channels_dim)
                 else:
                     assert encoder_hidden_states_cache.channels_dim == encoder_channels_dim
             hidden_states, hidden_states_cache = tensors["hidden_states"], cache.tensors["hidden_states"]
@@ -126,9 +118,9 @@ class DiffusionConcatCacheAction(ConcatCacheAction):
             if hidden_states_cache.channels_dim is None:
                 hidden_states_cache.channels_dim = channels_dim
                 if channels_dim == -1:
-                    hidden_states_cache.reshape = LinearReshapeFn()
+                    hidden_states_cache.reshape = LinearInputReshapeFn()
                 else:
-                    hidden_states_cache.reshape = AttentionInputReshapeFn(channels_dim)
+                    hidden_states_cache.reshape = AttnInputReshapeFn(channels_dim)
             else:
                 assert hidden_states_cache.channels_dim == channels_dim
         return super().info(name, module, tensors, cache)
@@ -166,11 +158,11 @@ class DiffusionCalibCacheLoader(BaseCalibCacheLoader):
             return IOTensorsCache(
                 inputs=TensorsCache(
                     OrderedDict(
-                        hidden_states=TensorCache(channels_dim=-1, reshape=LinearReshapeFn()),
-                        temb=TensorCache(channels_dim=1, reshape=LinearReshapeFn()),
+                        hidden_states=TensorCache(channels_dim=-1, reshape=LinearInputReshapeFn()),
+                        temb=TensorCache(channels_dim=1, reshape=LinearInputReshapeFn()),
                     )
                 ),
-                outputs=TensorCache(channels_dim=-1, reshape=LinearReshapeFn()),
+                outputs=TensorCache(channels_dim=-1, reshape=LinearInputReshapeFn()),
             )
         elif isinstance(module, Attention):
             return IOTensorsCache(

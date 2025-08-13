@@ -31,7 +31,7 @@ def infer_scale_dtypes(
     return [s_dtype or default_dtype for s_dtype in scale_dtypes]
 
 
-def infer_scale_quant_spans(scale_dtypes: tp.Sequence[QuantDataType], base: int = 1) -> list[float]:
+def infer_scale_quant_spans(scale_dtypes: tp.Sequence[torch.dtype | QuantDataType], base: int = 1) -> list[float]:
     quant_spans: list[float] = [base]
     for s_dtype in reversed(scale_dtypes[1:]):
         assert isinstance(s_dtype, QuantDataType), f"s_dtype must be QuantDataType, got {s_dtype}"

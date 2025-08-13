@@ -6,10 +6,10 @@ import torch.nn.functional as F
 
 __all__ = [
     "ReshapeFn",
-    "LinearReshapeFn",
+    "LinearInputReshapeFn",
     "ConvInputReshapeFn",
     "ConvOutputReshapedFn",
-    "AttentionInputReshapeFn",
+    "AttnInputReshapeFn",
 ]
 
 
@@ -17,13 +17,13 @@ class ReshapeFn:
     """Reshape function."""
 
     def __call__(self, x: torch.Tensor, /, ic_last: bool = True) -> torch.Tensor:
-        """Reshape input tensor to the desired shape used for GEMM.
+        """Reshape tensor to the desired shape used for GEMM.
 
         Args:
             x (`torch.Tensor`):
-                Input tensor.
+                Tensor.
             ic_last (`bool`, *optional*, defaults to `True`):
-                Whether input channel is the last dimension.
+                Whether reduction channel is the last dimension.
 
         Returns:
             `torch.Tensor`:
@@ -32,7 +32,7 @@ class ReshapeFn:
         return x
 
 
-class LinearReshapeFn(ReshapeFn):
+class LinearInputReshapeFn(ReshapeFn):
     """Inputs reshape function for linear layers."""
 
     def __call__(self, x: torch.Tensor, /, ic_last: bool = True) -> torch.Tensor:
@@ -125,7 +125,7 @@ class ConvOutputReshapedFn(ReshapeFn):
             return x.permute(1, 0, 2).reshape(ic, -1)
 
 
-class AttentionInputReshapeFn(ReshapeFn):
+class AttnInputReshapeFn(ReshapeFn):
     """Inputs reshape function for attention layer."""
 
     def __init__(self, channels_dim: int) -> None:

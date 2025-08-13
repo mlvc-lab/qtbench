@@ -37,7 +37,7 @@ def infer_dtype_bits(dtype: torch.dtype | QuantDataType) -> int:
         elif dtype == torch.uint8:
             return 8
         else:
-            raise ValueError(f"Unknown dtype {dtype}")
+            raise ValueError(f"Unknown dtype {dtype} for inferring bits")
 
 
 def infer_dtype_name(dtype: torch.dtype | QuantDataType) -> str:

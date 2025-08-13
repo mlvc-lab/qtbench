@@ -21,7 +21,7 @@ def quantize_scale(
     s: torch.Tensor,
     /,
     *,
-    quant_dtypes: tp.Sequence[QuantDataType],
+    quant_dtypes: tp.Sequence[tp.Union[torch.dtype, QuantDataType]],
     quant_spans: tp.Sequence[float],
     view_shapes: tp.Sequence[torch.Size],
 ) -> QuantScale:
@@ -68,7 +68,7 @@ def quantize_scale(
 class QuantScaleInfo:
     # region tensor information
     tensor_view_shape: torch.Size
-    tensor_quant_dtype: torch.dtype | QuantDataType
+    tensor_quant_dtype: QuantDataType
     tensor_zero_domain: ZeroPointDomain | None
     tensor_quant_range: QuantRange
     tensor_range_bound: RangeBound | None
@@ -77,7 +77,7 @@ class QuantScaleInfo:
     scale_view_shapes: list[torch.Size]
     scale_quant_dtypes: list[torch.dtype | QuantDataType]
     exponent_scale_level: int = field(init=False)
-    zero_quant_dtype: torch.dtype | QuantDataType = field(init=False)
+    zero_quant_dtype: torch.dtype | QuantDataType | None = field(init=False)
     # region linear scale information
     linear_tensor_quant_span: float = field(init=False)
     linear_scale_quant_dtypes: list[torch.dtype | QuantDataType] = field(init=False)
@@ -96,10 +96,10 @@ class QuantScaleInfo:
         return self.tensor_zero_domain is not None
 
     def __post_init__(self):
-        if isinstance(self.tensor_quant_dtype, torch.dtype):
-            raise NotImplementedError("torch.dtype is not supported yet.")
         self.tensor_quant_range = QuantRange.construct(
-            self.tensor_quant_dtype, has_zero_point=self.has_zero_point, quant_range=self.tensor_quant_range
+            self.tensor_quant_dtype,
+            has_zero_point=self.has_zero_point,
+            quant_range=self.tensor_quant_range,
         )
         self.scale_quant_dtypes = ScaleUtils.infer_scale_dtypes(self.scale_quant_dtypes, self.default_quant_dtype)
         self.exponent_scale_level = ScaleUtils.infer_exponent_scale_level(self.scale_quant_dtypes)
@@ -107,7 +107,6 @@ class QuantScaleInfo:
             if self.tensor_zero_domain == ZeroPointDomain.PreScale:
                 self.zero_quant_dtype = self.tensor_quant_dtype
             elif self.tensor_zero_domain == ZeroPointDomain.PostScale:
-                # TODO: fix zero quant dtype (signed or unsigned)
                 self.zero_quant_dtype = self.scale_quant_dtypes[-1]
                 if isinstance(self.zero_quant_dtype, QuantDataType) and self.zero_quant_dtype.is_exponent:
                     self.zero_quant_dtype = self.default_quant_dtype
@@ -127,11 +126,14 @@ class QuantScaleInfo:
             lin_s_view_shapes = self.scale_view_shapes[: self.exponent_scale_level]
             exp_s_view_shapes = self.scale_view_shapes[self.exponent_scale_level :]
             exp_s_spans = ScaleUtils.infer_scale_quant_spans(exp_s_dtypes)
-            lin_s_spans = ScaleUtils.infer_scale_quant_spans(lin_s_dtypes, base=exp_s_spans[-1]) if lin_s_dtypes else []
+            lin_s_spans = ScaleUtils.infer_scale_quant_spans(lin_s_dtypes, base=exp_s_spans[0]) if lin_s_dtypes else []
         else:
             lin_s_dtypes, exp_s_dtypes = self.scale_quant_dtypes, []
             lin_s_view_shapes, exp_s_view_shapes = self.scale_view_shapes, []
-            lin_s_spans, exp_s_spans = ScaleUtils.infer_scale_quant_spans(lin_s_dtypes), []
+            lin_s_spans, exp_s_spans = (
+                ScaleUtils.infer_scale_quant_spans(lin_s_dtypes),
+                [],
+            )
         self.linear_scale_quant_dtypes = lin_s_dtypes
         self.linear_scale_view_shapes = lin_s_view_shapes
         self.linear_scale_quant_spans = lin_s_spans
@@ -202,13 +204,17 @@ class QuantScaleInfo:
         else:
             lin_s = QuantScale()
         if self.exponent_scale_quant_dtypes:
-            if range_based:
-                exp_scale = dynamic_span / self.exponent_tensor_quant_span
-            else:
-                exp_scale = scale
             if lin_s.data is not None:
                 lin_s.data = lin_s.data.expand(self.linear_scale_view_shapes[-1]).reshape(self.scale_view_shapes[-1])
-                exp_scale = exp_scale / lin_s.data
+            if range_based:
+                exp_span = dynamic_span if lin_s.data is None else dynamic_span / lin_s.data
+                exp_scale_dtype = exp_span.dtype
+                delta = 1 << (23 - self.tensor_quant_dtype.mantissa_bits - 1)
+                exp_span = (exp_span.to(torch.float32).view(torch.int32) + delta).view(torch.float32)
+                exp_scale = exp_span / self.exponent_tensor_quant_span
+                exp_scale = exp_scale.to(exp_scale_dtype)
+            else:
+                exp_scale = scale if lin_s.data is None else scale / lin_s.data
             exp_s = quantize_scale(
                 exp_scale,
                 quant_dtypes=self.exponent_scale_quant_dtypes,

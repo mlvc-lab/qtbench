@@ -17,7 +17,7 @@ from transformers.models.mixtral.modeling_mixtral import MixtralSparseMoeBlock
 from transformers.models.t5.modeling_t5 import T5DenseActDense, T5DenseGatedActDense
 
 from deepcompressor.data.cache import IOTensorsCache, ModuleForwardInput, TensorCache
-from deepcompressor.data.utils.reshape import LinearReshapeFn
+from deepcompressor.data.utils.reshape import LinearInputReshapeFn
 from deepcompressor.dataset.action import CacheAction, ConcatCacheAction
 from deepcompressor.dataset.cache import BaseCalibCacheLoader
 from deepcompressor.dataset.config import BaseDataLoaderConfig
@@ -198,8 +198,8 @@ class LlmCalibCacheLoader(BaseCalibCacheLoader):
             module, (nn.Linear, RotaryEmbedding, MixtralSparseMoeBlock, T5DenseActDense, T5DenseGatedActDense)
         ) or module.__class__.__name__.endswith(("DecoderLayer", "Attention", "MLP")):
             return IOTensorsCache(
-                inputs=TensorCache(channels_dim=-1, reshape=LinearReshapeFn()),
-                outputs=TensorCache(channels_dim=-1, reshape=LinearReshapeFn()),
+                inputs=TensorCache(channels_dim=-1, reshape=LinearInputReshapeFn()),
+                outputs=TensorCache(channels_dim=-1, reshape=LinearInputReshapeFn()),
             )
         else:
             super()._init_cache(name, module)

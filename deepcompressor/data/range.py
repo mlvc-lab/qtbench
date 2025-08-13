@@ -58,12 +58,14 @@ class QuantRange(RangeBound):
             `QuantRange`:
                 The intersection of the current quantization range and the given data type.
         """
-        max_value = quant_dtype.max_value if self.max is None else min(self.max, quant_dtype.max_value)
-        min_value = quant_dtype.min_value if self.min is None else max(self.min, quant_dtype.min_value)
+        max_value, min_value = quant_dtype.max_value, quant_dtype.min_value
         if quant_dtype.signed and not has_zero_point:
             max_value = min(abs(min_value), abs(max_value))
             min_value = -max_value
-        return QuantRange(min=min_value, max=max_value)
+        return QuantRange(
+            min=min_value if self.min is None else max(self.min, min_value),
+            max=max_value if self.max is None else min(self.max, max_value),
+        )
 
     def intersect_log2(self, quant_dtype: QuantDataType) -> "LogQuantRange":
         """Return the intersection of the current quantization range and the given data type in log2 space.
@@ -132,17 +134,16 @@ class LogQuantRange(QuantRange):
             `LogQuantRange`:
                 The intersection of the current quantization range and the given data type in log2 space.
         """
-        max_value = (
-            quant_dtype.max_exponent_value if self.max is None else min(self.max, quant_dtype.max_exponent_value)
+        return LogQuantRange(
+            min=quant_dtype.min_exponent_value if self.min is None else max(self.min, quant_dtype.min_exponent_value),
+            max=quant_dtype.max_exponent_value if self.max is None else min(self.max, quant_dtype.max_exponent_value),
         )
-        min_value = (
-            quant_dtype.min_exponent_value if self.min is None else max(self.min, quant_dtype.min_exponent_value)
-        )
-        return LogQuantRange(min=min_value, max=max_value)
 
     @staticmethod
     def construct(
-        dtype: QuantDataType, quant_range: tp.Optional[tp.Union["LogQuantRange", QuantRange]] = None
+        dtype: QuantDataType,
+        *,
+        quant_range: tp.Optional[tp.Union["LogQuantRange", QuantRange]] = None,
     ) -> "LogQuantRange":
         """Return the intersection of the given quantization range and the given data type in log2 space.
 
@@ -156,6 +157,7 @@ class LogQuantRange(QuantRange):
             `LogQuantRange`:
                 The intersection of the given quantization range and the given data type in log2 space.
         """
+        assert dtype.is_exponent, "dtype must be exponent data type"
         return (quant_range or LogQuantRange()).intersect_log2(dtype)
 
 

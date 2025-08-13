@@ -201,13 +201,13 @@ class QuantizerImpl:
             else:
                 dynamic_range = (dynamic_range,)
         assert isinstance(scale, (tuple, list)), "scale must be a tuple or list."
-        assert len(scale) == num_steps, "scale must have the same length as infos."
+        assert len(scale) == num_steps, "scale must have the same length as quantizer infos."
         assert isinstance(dynamic_range, (tuple, list)), "dynamic_range must be a tuple or list."
-        assert len(dynamic_range) == num_steps, "dynamic_range must have the same length as infos."
+        assert len(dynamic_range) == num_steps, "dynamic_range must have the same length as quantizer infos."
         # endregion
+        develop_tensor = tensor.to(dtype=develop_dtype, copy=True)
         # region compute and quantize the scales and zero point for quantization
         quant_scale = QuantScale()
-        develop_tensor = tensor.to(dtype=develop_dtype) if dtype != develop_dtype else tensor.clone()
         for step, (step_info, step_scale, step_dynamic_range) in enumerate(
             zip(self.info.steps, scale, dynamic_range, strict=True)
         ):

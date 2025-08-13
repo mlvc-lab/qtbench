@@ -16,7 +16,7 @@ def simple_quantize(
     quant_dtype: torch.dtype | QuantDataType,
     has_zero_point: bool,
     quant_range: QuantRange | None = None,
-    round_delta: torch.Tensor | None = None,
+    round_delta: torch.Tensor | float | None = None,
 ) -> torch.Tensor:
     """Simple quantization function."""
     requires_grad = tensor.requires_grad
@@ -31,7 +31,7 @@ def simple_quantize(
     elif isinstance(quant_dtype, QuantDataType):
         if quant_dtype.is_exponent:
             assert round_delta is None, "round_delta is not supported for exponential quantization"
-            quant_range = LogQuantRange.construct(quant_dtype, quant_range)
+            quant_range = LogQuantRange.construct(quant_dtype, quant_range=quant_range)
             tensor = ste(tensor.log2(), torch.floor) if requires_grad else tensor.log2_().floor_()
             return tensor.clamp_(min=quant_range.min, max=quant_range.max).exp2_()
         elif quant_dtype.is_float_point:

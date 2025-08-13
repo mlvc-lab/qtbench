@@ -102,11 +102,11 @@ def format_group_configs(
     return tuple(_group_shapes), _scale_dtypes
 
 
-def infer_group_shapes(group_shapes: tuple[tuple[int, ...], ...], shape: torch.Size) -> list[torch.Size]:
+def infer_group_shapes(group_shapes: tp.Sequence[tp.Sequence[int]], shape: torch.Size) -> list[torch.Size]:
     """Infer the group shapes using group shape config on the given tensor shape.
 
     Args:
-        group_shapes (`tuple[tuple[int, ...], ...]`):
+        group_shapes (`tp.Sequence[tp.Sequence[int]]`):
             The group shapes.
         shape (`torch.Size`):
             The shape of the tensor.

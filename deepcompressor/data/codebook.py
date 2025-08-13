@@ -79,7 +79,7 @@ class Codebook:
         device: torch.device | str = "cpu",
         dtype: torch.dtype = torch.float32,
     ) -> "Codebook":
-        """Create a map of values to a code of `code_bits` bits.
+        """Create a codebook from a list of (value, code) maps.
 
         Args:
             maps (`list[tuple[float, int]]`):
@@ -97,7 +97,7 @@ class Codebook:
         """
         if bits > 8:
             raise NotImplementedError("Codebook with more than 8 bits is not supported")
-        assert len(maps) <= 2**bits, "Too many (value, code) maps for the code bits"
+        assert len(maps) <= 2**bits, f"Codebook size {len(maps)} is larger than {2**bits} for {bits} bits"
         size = len(maps)
         maps.sort(key=lambda x: x[0])
         values = torch.tensor([v[0] for v in maps], device=device, dtype=dtype)

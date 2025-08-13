@@ -5,8 +5,6 @@ quant:
     - - 1
       - 64
       - 1
-      - 1
-      - 1
     scale_dtypes:
     - null
   ipts:
@@ -15,8 +13,6 @@ quant:
     group_shapes:
     - - 1
       - 64
-      - 1
-      - 1
       - 1
     scale_dtypes:
     - null
