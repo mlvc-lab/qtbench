@@ -164,6 +164,7 @@ cython_debug/
 !.vscode/settings.json
 
 .DS_Store
+._*
 *.log
 *.pt
 .tmp/
