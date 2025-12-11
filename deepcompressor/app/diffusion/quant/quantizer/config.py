@@ -9,7 +9,7 @@ from omniconfig import configclass
 from deepcompressor.calib.config import SkipBasedDynamicRangeCalibConfig, SkipBasedQuantLowRankCalibConfig
 from deepcompressor.data.dtype import QuantDataType
 from deepcompressor.quantizer.config import QuantizerConfig
-from deepcompressor.quantizer.kernel import QuantGptqConfig
+from deepcompressor.quantizer.kernel import QuantGptqConfig, QuantLzsConfig
 from deepcompressor.utils.config import EnableConfig, IncludeBasedConfig, SkipBasedConfig
 
 __all__ = [
@@ -42,6 +42,28 @@ class DiffusionGPTQConfig(SkipBasedConfig, QuantGptqConfig):
 
 @configclass
 @dataclass
+class DiffusionLZSConfig(SkipBasedConfig, QuantLzsConfig):
+    """
+    Configuration for LZS quantization.
+
+    Args:
+        bits (`int`, *optional*, defaults to `4`):
+            The target number of bits. Defaults to 4.
+        base (`int`, *optional*, defaults to `8`):
+            The target number of base bits. Defaults to 8.
+        group_size (`int` or `torch.Tensor`, *optional*, defaults to `16`):
+            The group size for quantization. Defaults to 16.
+        channel_dim (`int`, *optional*, defaults to `1`):
+            The channel dimension. Defaults to 1.
+        symmetric (`bool`, *optional*, defaults to `False`):
+            Whether to use symmetric quantization. Defaults to False.
+    """
+
+    pass
+
+
+@configclass
+@dataclass
 class DiffusionQuantizerConfig(QuantizerConfig):
     """Diffusion model quantizer configuration.
 
@@ -66,6 +88,7 @@ class DiffusionQuantizerConfig(QuantizerConfig):
 
     static: bool = False
     kernel_gptq: DiffusionGPTQConfig | None = None
+    kernel_lzs: DiffusionLZSConfig | None = None
     low_rank: SkipBasedQuantLowRankCalibConfig | None = None
     calib_range: SkipBasedDynamicRangeCalibConfig | None = None
 
@@ -78,6 +101,8 @@ class DiffusionQuantizerConfig(QuantizerConfig):
             self.calib_range = None
         if self.kernel_gptq is not None and not self.kernel_gptq.is_enabled():
             self.kernel_gptq = None
+        if self.kernel_lzs is not None and not self.kernel_lzs.is_enabled():
+            self.kernel_lzs = None
         if self.static and self.calib_range is None:
             self.calib_range = SkipBasedDynamicRangeCalibConfig()
         if self.low_rank is not None and not self.low_rank.is_enabled():
@@ -87,6 +112,11 @@ class DiffusionQuantizerConfig(QuantizerConfig):
     def enabled_gptq(self) -> bool:
         """Whether quantization kernel calibration is enabled."""
         return self.kernel_gptq is not None and self.kernel_gptq.is_enabled()
+
+    @property
+    def enabled_lzs(self) -> bool:
+        """Whether LZS compression is enabled."""
+        return self.kernel_lzs is not None and self.kernel_lzs.is_enabled()
 
     @property
     def enabled_low_rank(self) -> bool:
@@ -136,6 +166,8 @@ class SkipBasedDiffusionQuantizerConfig(SkipBasedConfig, DiffusionQuantizerConfi
             Whether to use static quantization.
         kernel_gptq (`DiffusionGPTQConfig` or `None`, *optional*, defaults to `None`):
             The gptq quantization configuration.
+        kernel_lzs (`DiffusionLZSConfig` or `None`, *optional*, defaults to `None`):
+            The lzs quantization configuration.
         low_rank (`SkipBasedQuantLowRankCalibConfig` or `None`, *optional*, defaults to `None`):
             The quantization low-rank branch calibration configuration.
         calib_range (`DynamicRangeCalibConfig` or `None`, *optional*, defaults to `None`):
@@ -286,6 +318,7 @@ class DiffusionExtraWeightQuantizerConfig(IncludeBasedConfig, DiffusionQuantizer
 
     static: bool = field(init=False, default=True)
     kernel_gptq: DiffusionGPTQConfig | None = field(init=False, default=None)
+    kernel_lzs: DiffusionLZSConfig | None = field(init=False, default=None)
     low_rank: SkipBasedQuantLowRankCalibConfig | None = field(init=False, default=None)
     calib_range: SkipBasedDynamicRangeCalibConfig | None = field(init=False, default=None)
 

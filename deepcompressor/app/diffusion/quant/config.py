@@ -152,6 +152,8 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
         if self.needs_acts_quantizer_cache:
             if self.enabled_ipts and self.ipts.needs_calib_data:
                 quant_names.extend(self.ipts.calib_range.generate_dirnames(prefix="x.range"))
+            if self.enabled_ipts and self.ipts.enabled_lzs:
+                quant_names.extend(self.ipts.kernel_lzs.generate_dirnames(prefix="x.lzs"))
             if self.enabled_opts and self.opts.needs_calib_data:
                 quant_names.extend(self.opts.calib_range.generate_dirnames(prefix="y.range"))
             acts_dirpath = os.path.join("acts", *quant_names)
@@ -371,6 +373,15 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
                     xrange_skips = xrange_skips - skips_map["x"]
                     xrange_skips.add("[x]")
                 xrange_name += ".skip.[{}]".format("+".join(sorted(xrange_skips)))
+        lzs_name = ""
+        if self.enabled_ipts and self.ipts.kernel_lzs is not None:
+            lzs_name = "-lzs"
+            if self.ipts.kernel_lzs.skips:
+                ipts_skips = simplify_skips(self.ipts.kernel_lzs.skips)
+                if "x" in skips_map and ipts_skips.issuperset(skips_map["x"]):
+                    ipts_skips = ipts_skips - skips_map["x"]
+                    ipts_skips.add("[x]")
+                lzs_name += ".skip.[{}]".format("+".join(sorted(ipts_skips)))
         yrange_name = ""
         if (
             self.enabled_opts
@@ -405,6 +416,7 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
             + gptq_name
             + wrange_name
             + xrange_name
+            + lzs_name
             + yrange_name
         )
         name = name[1:] if name else "default"
@@ -468,6 +480,11 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
                 for skip in self.ipts.calib_range.skips:
                     ipts_calib_range_skips.extend(list(key_map[skip]))
                 self.ipts.calib_range.skips = sorted(set(ipts_calib_range_skips) - ipts_skip_set)
+            if self.ipts.kernel_lzs is not None:
+                ipts_kernel_lzs_skips = []
+                for skip in self.ipts.kernel_lzs.skips:
+                    ipts_kernel_lzs_skips.extend(list(key_map[skip]))
+                self.ipts.kernel_lzs.skips = sorted(set(ipts_kernel_lzs_skips) - ipts_skip_set)
         if self.opts is not None:
             opts_skips = []
             for skip in self.opts.skips:

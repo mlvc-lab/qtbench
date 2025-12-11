@@ -18,6 +18,7 @@ from deepcompressor.quantizer.processor import Quantizer
 from .config import (
     DiffusionActivationQuantizerConfig,
     DiffusionGPTQConfig,
+    DiffusionLZSConfig,
     DiffusionQuantizerConfig,
     DiffusionWeightQuantizerConfig,
 )
@@ -66,12 +67,16 @@ class DiffusionQuantizer(Quantizer):
     """
 
     config: DiffusionQuantizerConfig
-    kernel: DiffusionGPTQConfig | None = field(init=False)
+    kernel: DiffusionGPTQConfig | DiffusionLZSConfig | None = field(init=False)
     low_rank: SkipBasedQuantLowRankCalibConfig | None = field(init=False)
     tensor_type: TensorType = TensorType.Weights
 
     def __post_init__(self) -> None:
         self.kernel = self.config.kernel_gptq
+        if self.config.kernel_gptq is not None:
+            self.kernel = self.config.kernel_gptq
+        else:
+            self.kernel = self.config.kernel_lzs
         self.low_rank = self.config.low_rank
 
     def calibrate_dynamic_range(
