@@ -1,5 +1,5 @@
 <p align="center">
-<img src="assets/eng_logo.png" alt="ENC Logo" width="450">
+<img src="assets/enc_logo.png" alt="ENC Logo" width="450">
 </p>
 
 <h2><p align="center">Model Compression Toolbox for LLMs and Diffusion Models</p></h2>
