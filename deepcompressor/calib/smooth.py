@@ -23,12 +23,30 @@ __all__ = [
     "smooth_attention",
     "convert_smooth_upscale_to_downscale",
     "ActivationSmoother",
+    "TimestepActivationSmoother",
+    "TimestepContext",
     "get_smooth_scale",
     "get_smooth_span",
     "SmoothCalibrator",
     "SmoothLinearCalibrator",
     "SmoothAttentionCalibrator",
 ]
+
+
+class TimestepContext:
+    """Lightweight store for the current timestep during a forward pass."""
+
+    def __init__(self) -> None:
+        self._current: tp.Any | None = None
+
+    def set(self, timestep: tp.Any) -> None:
+        self._current = timestep
+
+    def get(self) -> tp.Any | None:
+        return self._current
+
+    def clear(self) -> None:
+        self._current = None
 
 
 @dataclass
@@ -76,6 +94,47 @@ class ActivationSmoother(BaseTensorProcessor):
             return tensor.mul(smooth_scale).to(dtype=dtype)
         else:
             return tensor.div(smooth_scale).to(dtype=dtype)
+
+
+@dataclass
+class TimestepActivationSmoother(ActivationSmoother):
+    """Activation smoother that chooses scale based on the current timestep."""
+
+    timestep_scales: dict[str, torch.Tensor] = None
+    timestep_context: "TimestepContext | None" = None
+
+    def __post_init__(self) -> None:
+        if self.timestep_scales is None:
+            self.timestep_scales = {}
+        super().__post_init__()
+
+    @staticmethod
+    def _normalize_timestep(timestep: tp.Any) -> str:
+        if isinstance(timestep, torch.Tensor):
+            if timestep.numel() == 0:
+                return "unknown"
+            return str(timestep.flatten()[0].item())
+        try:
+            return str(float(timestep))
+        except Exception:
+            return str(timestep)
+
+    def register_scale(self, timestep: tp.Any, scale: torch.Tensor) -> None:
+        key = self._normalize_timestep(timestep)
+        self.timestep_scales[key] = scale.detach().cpu()
+
+    def process(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.develop_dtype is None:
+            self.develop_dtype = tensor.dtype
+        ts_ctx = self.timestep_context
+        scale = self.smooth_scale
+        if ts_ctx is not None:
+            ts = ts_ctx.get()
+            if ts is not None:
+                key = self._normalize_timestep(ts)
+                scale = self.timestep_scales.get(key, self.smooth_scale)
+        self.smooth_scale = scale
+        return super().process(tensor)
 
 
 @torch.inference_mode()
@@ -131,13 +190,12 @@ def get_smooth_scale(*, alpha_base: torch.Tensor, beta_base: torch.Tensor, alpha
         `torch.Tensor`:
             Smoothing scale.
     """
-    assert 0 <= alpha <= 1 and 0 <= beta <= 1, "The smooth factors should be in [0, 1]."
-    if alpha > 0:
-        smooth_scale = alpha_base.pow(alpha)
-        if beta > 0:
-            smooth_scale = smooth_scale.div_(beta_base.pow(beta))
-    else:
-        smooth_scale = beta_base.pow(-beta)
+    assert -3 <= alpha <= 1 and -3 <= beta <= 1, "The smooth factors should be in [-3, 1]."
+    # clamp to avoid NaN/Inf when negative exponents are used
+    eps = torch.finfo(alpha_base.dtype).tiny
+    a = alpha_base.clamp_min(eps)
+    b = beta_base.clamp_min(eps)
+    smooth_scale = a.pow(alpha).div_(b.pow(beta))
     smooth_scale[smooth_scale == 0] = 1
     if smooth_scale.isnan().any() or smooth_scale.isinf().any():
         smooth_scale = smooth_scale.fill_(1)
@@ -922,6 +980,7 @@ def smooth_linear_modules(
     modules: tp.Sequence[nn.Linear] | nn.Linear,
     *,
     scale: torch.Tensor | None,
+    apply_weight: bool = True,
     config: SmoothCalibConfig | None = None,
     weight_quantizer: Quantizer | None = None,
     input_quantizer: Quantizer | None = None,
@@ -998,20 +1057,23 @@ def smooth_linear_modules(
         gc.collect()
         torch.cuda.empty_cache()
     upscale = scale
-    for module in modules + extra_modules:
-        upscale = upscale.to(device=module.weight.device)
-        smooth_upscale_param(module.weight, upscale, channels_dim=1)
-    if prevs is not None:
-        downscale = convert_smooth_upscale_to_downscale(upscale, num_heads=num_heads, num_head_repeats=num_head_repeats)
-        if isinstance(prevs, nn.Module):
-            prevs = [prevs]
-        for module in prevs:
-            if module is None:
-                continue
-            downscale = downscale.to(device=module.weight.device)
-            smooth_downscale_param(module.weight, downscale, channels_dim=0)
-            if hasattr(module, "bias") and module.bias is not None:
-                smooth_downscale_param(module.bias, downscale, channels_dim=0)
+    if apply_weight:
+        for module in modules + extra_modules:
+            upscale = upscale.to(device=module.weight.device)
+            smooth_upscale_param(module.weight, upscale, channels_dim=1)
+        if prevs is not None:
+            downscale = convert_smooth_upscale_to_downscale(
+                upscale, num_heads=num_heads, num_head_repeats=num_head_repeats
+            )
+            if isinstance(prevs, nn.Module):
+                prevs = [prevs]
+            for module in prevs:
+                if module is None:
+                    continue
+                downscale = downscale.to(device=module.weight.device)
+                smooth_downscale_param(module.weight, downscale, channels_dim=0)
+                if hasattr(module, "bias") and module.bias is not None:
+                    smooth_downscale_param(module.bias, downscale, channels_dim=0)
     return scale.to(device="cpu")
 
 

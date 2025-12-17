@@ -43,6 +43,7 @@ quant:
     calib_range:
       sample_batch_size: -1
   smooth:
+    per_timestep: false
     proj:
       sample_batch_size: -1
     attn:

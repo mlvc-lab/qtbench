@@ -354,10 +354,14 @@ class SmoothTransfomerConfig:
             The smooth configuration for projections.
         attn (`SmoothAttentionCalibConfig` or `None`, *optional*, default=`None`):
             The smooth configuration for attentions.
+        per_timestep (`bool`, *optional*, default=`False`):
+            Whether to search and store smoothing scales per timestep instead of sharing
+            one scale across all timesteps.
     """
 
     proj: SkipBasedSmoothCalibConfig | None = None
     attn: SmoothAttentionCalibConfig | None = None
+    per_timestep: bool = False
 
     @property
     def enabled_proj(self) -> bool:
@@ -393,4 +397,6 @@ class SmoothTransfomerConfig:
             names.append("-".join(name))
         if prefix:
             names = [f"{prefix}.{name}" for name in names]
+        if self.per_timestep:
+            names = [f"{name}.ts" for name in names]
         return names

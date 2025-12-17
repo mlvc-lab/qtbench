@@ -327,6 +327,9 @@ class DiffusionCalibCacheLoader(BaseCalibCacheLoader):
             layer_kwargs.pop("hidden_states", None)
             layer_kwargs.pop("encoder_hidden_states", None)
             layer_kwargs.pop("temb", None)
+            # keep per-batch timesteps for per-timestep smoothing
+            layer_kwargs["timestep_batches"] = [inputs.kwargs.get("timestep", None) for inputs in layer_inputs]
+            layer_kwargs["batch_size"] = self.batch_size
             layer_struct = layer_structs[layer_idx]
             if isinstance(layer_struct, DiffusionBlockStruct):
                 assert layer_struct.name == layer_name
