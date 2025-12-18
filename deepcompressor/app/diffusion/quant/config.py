@@ -48,7 +48,9 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
     calib: DiffusionCalibCacheLoaderConfig
     rotation: QuantRotationConfig | None = None
     smooth: SmoothTransfomerConfig | None = None
-    develop_dtype: torch.dtype = field(default_factory=lambda s=torch.float32: eval_dtype(s, with_quant_dtype=False))
+    develop_dtype: torch.dtype = field(
+        default_factory=lambda s=torch.float32: eval_dtype(s, with_quant_dtype=False)
+    )
 
     def __post_init__(self) -> None:  # noqa: C901
         super().__post_init__()
@@ -57,7 +59,11 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
         if self.smooth is not None:
             if not self.smooth.enabled_proj and not self.smooth.enabled_attn:
                 self.smooth = None
-        if self.enabled_smooth and self.smooth.enabled_proj and self.smooth.proj.allow_low_rank:
+        if (
+            self.enabled_smooth
+            and self.smooth.enabled_proj
+            and self.smooth.proj.allow_low_rank
+        ):
             if self.enabled_wgts:
                 self.smooth.proj.allow_low_rank = self.wgts.enabled_low_rank
                 if self.smooth.proj.allow_low_rank:
@@ -65,15 +71,31 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
             else:
                 self.smooth.proj.allow_low_rank = False
         if self.enabled_ipts:
-            if self.ipts.enabled_calib_range and self.ipts.calib_range.granularity == SearchBasedCalibGranularity.Group:
-                self.ipts.calib_range.granularity = SearchBasedCalibGranularity.ChannelGroup
+            if (
+                self.ipts.enabled_calib_range
+                and self.ipts.calib_range.granularity
+                == SearchBasedCalibGranularity.Group
+            ):
+                self.ipts.calib_range.granularity = (
+                    SearchBasedCalibGranularity.ChannelGroup
+                )
             if self.ipts.static:
-                assert self.ipts.smallest_group_shape[0] == -1, "static quantization requires batch group size to be -1"
+                assert (
+                    self.ipts.smallest_group_shape[0] == -1
+                ), "static quantization requires batch group size to be -1"
         if self.enabled_opts:
-            if self.opts.enabled_calib_range and self.opts.calib_range.granularity == SearchBasedCalibGranularity.Group:
-                self.opts.calib_range.granularity = SearchBasedCalibGranularity.ChannelGroup
+            if (
+                self.opts.enabled_calib_range
+                and self.opts.calib_range.granularity
+                == SearchBasedCalibGranularity.Group
+            ):
+                self.opts.calib_range.granularity = (
+                    SearchBasedCalibGranularity.ChannelGroup
+                )
             if self.opts.static:
-                assert self.opts.smallest_group_shape[0] == -1, "static quantization requires batch group size to be -1"
+                assert (
+                    self.opts.smallest_group_shape[0] == -1
+                ), "static quantization requires batch group size to be -1"
         self.organize()
         self.unsigned_ipts = self.ipts.for_unsigned()
 
@@ -131,7 +153,11 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
         if shift:
             quant_names.append("shift")
         if self.enabled_wgts and self.wgts.enabled_low_rank:
-            quant_names.extend(QuantLowRankConfig.generate_dirnames(self.wgts.low_rank, prefix="lowrank"))
+            quant_names.extend(
+                QuantLowRankConfig.generate_dirnames(
+                    self.wgts.low_rank, prefix="lowrank"
+                )
+            )
         if self.enabled_rotation:
             quant_names.extend(self.rotation.generate_dirnames(prefix="rotate"))
         smooth_dirpath = ""
@@ -144,24 +170,39 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
             branch_dirpath = os.path.join("branch", *quant_names)
         wgts_dirpath = ""
         if self.enabled_wgts and self.wgts.needs_calib_data:
-            quant_names.extend(self.wgts.calib_range.generate_dirnames(prefix="w.range"))
+            quant_names.extend(
+                self.wgts.calib_range.generate_dirnames(prefix="w.range")
+            )
             wgts_dirpath = os.path.join("wgts", *quant_names)
         if self.enabled_wgts and self.wgts.enabled_gptq:
-            quant_names.extend(self.wgts.kernel_gptq.generate_dirnames(prefix="w.kernel"))
+            quant_names.extend(
+                self.wgts.kernel_gptq.generate_dirnames(prefix="w.kernel")
+            )
         acts_dirpath = ""
         if self.needs_acts_quantizer_cache:
             if self.enabled_ipts and self.ipts.needs_calib_data:
-                quant_names.extend(self.ipts.calib_range.generate_dirnames(prefix="x.range"))
+                quant_names.extend(
+                    self.ipts.calib_range.generate_dirnames(prefix="x.range")
+                )
             if self.enabled_ipts and self.ipts.enabled_lzs:
-                quant_names.extend(self.ipts.kernel_lzs.generate_dirnames(prefix="x.lzs"))
+                quant_names.extend(
+                    self.ipts.kernel_lzs.generate_dirnames(prefix="x.lzs")
+                )
             if self.enabled_opts and self.opts.needs_calib_data:
-                quant_names.extend(self.opts.calib_range.generate_dirnames(prefix="y.range"))
+                quant_names.extend(
+                    self.opts.calib_range.generate_dirnames(prefix="y.range")
+                )
             acts_dirpath = os.path.join("acts", *quant_names)
         cache_dirpath = DiffusionQuantCacheConfig(
-            smooth=smooth_dirpath, branch=branch_dirpath, wgts=wgts_dirpath, acts=acts_dirpath
+            smooth=smooth_dirpath,
+            branch=branch_dirpath,
+            wgts=wgts_dirpath,
+            acts=acts_dirpath,
         ).simplify(type(self)._key_map)
         cache_dirpath = cache_dirpath.add_parent_dirs(*self.calib.generate_dirnames())
-        cache_dirpath = cache_dirpath.add_parent_dirs(root, "diffusion", "cache", "quant")
+        cache_dirpath = cache_dirpath.add_parent_dirs(
+            root, "diffusion", "cache", "quant"
+        )
         return cache_dirpath
 
     def generate_default_dirname(self) -> str:  # noqa: C901
@@ -170,9 +211,9 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
 
         def simplify_skips(skips):
             return set(
-                DiffusionQuantCacheConfig.simplify_path("skip.[{}]".format("+".join(skips)), key_map=key_map)[
-                    6:-1
-                ].split("+")
+                DiffusionQuantCacheConfig.simplify_path(
+                    "skip.[{}]".format("+".join(skips)), key_map=key_map
+                )[6:-1].split("+")
             )
 
         skip_name, y_skips, w_skips, x_skips = "", set(), set(), set()
@@ -193,7 +234,9 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
             if w_skips:
                 skip_name_list.append(("w", w_skips))
             # sort the keys by the number of elements in the set
-            skip_name_list = sorted(skip_name_list, key=lambda x: (len(x[1]), x[0]), reverse=False)
+            skip_name_list = sorted(
+                skip_name_list, key=lambda x: (len(x[1]), x[0]), reverse=False
+            )
             skips_map = {k: v for k, v in skip_name_list}  # noqa: C416
             skip_name_map: dict[str, set] = {}
             skip_0, skip_0_names = skip_name_list[0]
@@ -206,7 +249,9 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
                 skip_name_map[skip_1] = skip_1_names
                 if len(skip_name_list) > 2:
                     skip_2, skip_2_names = skip_name_list[2]
-                    if skip_2_names.issuperset(skip_name_list[1][1]):  # skip_1_names may be modified
+                    if skip_2_names.issuperset(
+                        skip_name_list[1][1]
+                    ):  # skip_1_names may be modified
                         skip_2_names = skip_2_names - skip_name_list[1][1]
                         skip_2_names.add(f"[{skip_1}]")
                     if skip_2_names.issuperset(skip_0_names):
@@ -222,7 +267,9 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
             del skip_name_list, skip_name_map
         extra_name = ""
         if self.enabled_extra_wgts:
-            extra_name = "-extra.[{}]".format("+".join(sorted(simplify_skips(self.extra_wgts.includes))))
+            extra_name = "-extra.[{}]".format(
+                "+".join(sorted(simplify_skips(self.extra_wgts.includes)))
+            )
         lowrank_name = ""
         if self.enabled_wgts and self.wgts.enabled_low_rank:
             lowrank_name = f"-low.r{num2str(self.wgts.low_rank.rank)}"
@@ -247,10 +294,12 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
             rotation_name = "-rot"
             if self.rotation.random:
                 rotation_name += ".rnd"
-            rotation_name += ".[{}]".format("+".join(sorted(simplify_skips(self.rotation.transforms))))
+            rotation_name += ".[{}]".format(
+                "+".join(sorted(simplify_skips(self.rotation.transforms)))
+            )
         smooth_name = ""
         if self.enabled_smooth:
-            smooth_name = "-smth"
+            smooth_name = "-smth" if not self.smooth.proj.reverse else "-rev_smth"
             if self.smooth.enabled_proj:
                 smooth_name += ".proj"
                 if self.smooth.proj.granularity != SearchBasedCalibGranularity.Layer:
@@ -270,14 +319,22 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
                         xspan_eq_wspan = False
                         break
                 if xspan_eq_wspan:
-                    smooth_name += ".[{}]".format("+".join(xspan.name for xspan, _ in self.smooth.proj.spans))
+                    smooth_name += ".[{}]".format(
+                        "+".join(xspan.name for xspan, _ in self.smooth.proj.spans)
+                    )
                 else:
                     smooth_name += ".[{}]".format(
-                        "+".join(f"x.{xspan.name}.w.{wspan.name}" for xspan, wspan in self.smooth.proj.spans)
+                        "+".join(
+                            f"x.{xspan.name}.w.{wspan.name}"
+                            for xspan, wspan in self.smooth.proj.spans
+                        )
                     )
                 if self.smooth.proj.allow_low_rank:
                     smooth_name += ".lr"
-                if not self.smooth.proj.allow_b_quant or not self.smooth.proj.allow_a_quant:
+                if (
+                    not self.smooth.proj.allow_b_quant
+                    or not self.smooth.proj.allow_a_quant
+                ):
                     smooth_name += ".no.["
                     if not self.smooth.proj.allow_a_quant:
                         smooth_name += "a+"
@@ -309,10 +366,15 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
                         xspan_eq_yspan = False
                         break
                 if xspan_eq_yspan:
-                    smooth_name += ".[{}]".format("+".join(xspan.name for xspan, _ in self.smooth.attn.spans))
+                    smooth_name += ".[{}]".format(
+                        "+".join(xspan.name for xspan, _ in self.smooth.attn.spans)
+                    )
                 else:
                     smooth_name += ".[{}]".format(
-                        "+".join(f"x.{xspan.name}.y.{yspan.name}" for xspan, yspan in self.smooth.attn.spans)
+                        "+".join(
+                            f"x.{xspan.name}.y.{yspan.name}"
+                            for xspan, yspan in self.smooth.attn.spans
+                        )
                     )
         gptq_name = ""
         if self.enabled_wgts and self.wgts.kernel_gptq is not None:
@@ -331,9 +393,15 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
         ):
             wrange_name = "-w.range"
             if self.wgts.calib_range.needs_search:
-                if self.wgts.calib_range.granularity != SearchBasedCalibGranularity.Group:
+                if (
+                    self.wgts.calib_range.granularity
+                    != SearchBasedCalibGranularity.Group
+                ):
                     wrange_name += f".{self.wgts.calib_range.granularity.name}"
-                if self.wgts.calib_range.objective != SearchBasedCalibObjective.OutputsError:
+                if (
+                    self.wgts.calib_range.objective
+                    != SearchBasedCalibObjective.OutputsError
+                ):
                     wrange_name += f".{self.wgts.calib_range.objective.name}"
                 if self.wgts.calib_range.degree != 2:
                     wrange_name += f".d{num2str(self.wgts.calib_range.degree)}"
@@ -356,9 +424,15 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
         ):
             xrange_name = "-x.range"
             if self.ipts.calib_range.needs_search:
-                if self.ipts.calib_range.granularity != SearchBasedCalibGranularity.Group:
+                if (
+                    self.ipts.calib_range.granularity
+                    != SearchBasedCalibGranularity.Group
+                ):
                     xrange_name += f".{self.ipts.calib_range.granularity.name}"
-                if self.ipts.calib_range.objective != SearchBasedCalibObjective.OutputsError:
+                if (
+                    self.ipts.calib_range.objective
+                    != SearchBasedCalibObjective.OutputsError
+                ):
                     xrange_name += f".{self.ipts.calib_range.objective.name}"
                 if self.ipts.calib_range.degree != 2:
                     xrange_name += f".d{num2str(self.ipts.calib_range.degree)}"
@@ -390,9 +464,15 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
         ):
             yrange_name = "-y.range"
             if self.opts.calib_range.needs_search:
-                if self.opts.calib_range.granularity != SearchBasedCalibGranularity.Group:
+                if (
+                    self.opts.calib_range.granularity
+                    != SearchBasedCalibGranularity.Group
+                ):
                     yrange_name += f".{self.opts.calib_range.granularity.name}"
-                if self.opts.calib_range.objective != SearchBasedCalibObjective.OutputsError:
+                if (
+                    self.opts.calib_range.objective
+                    != SearchBasedCalibObjective.OutputsError
+                ):
                     yrange_name += f".{self.opts.calib_range.objective.name}"
                 if self.opts.calib_range.degree != 2:
                     yrange_name += f".d{num2str(self.opts.calib_range.degree)}"
@@ -450,17 +530,23 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
                 wgts_kernel_gptq_skips = []
                 for skip in self.wgts.kernel_gptq.skips:
                     wgts_kernel_gptq_skips.extend(list(key_map[skip]))
-                self.wgts.kernel_gptq.skips = sorted(set(wgts_kernel_gptq_skips) - wgts_skip_set)
+                self.wgts.kernel_gptq.skips = sorted(
+                    set(wgts_kernel_gptq_skips) - wgts_skip_set
+                )
             if self.wgts.low_rank is not None:
                 wgts_low_rank_skips = []
                 for skip in self.wgts.low_rank.skips:
                     wgts_low_rank_skips.extend(list(key_map[skip]))
-                self.wgts.low_rank.skips = sorted(set(wgts_low_rank_skips) - wgts_skip_set)
+                self.wgts.low_rank.skips = sorted(
+                    set(wgts_low_rank_skips) - wgts_skip_set
+                )
             if self.wgts.calib_range is not None:
                 wgts_calib_range_skips = []
                 for skip in self.wgts.calib_range.skips:
                     wgts_calib_range_skips.extend(list(key_map[skip]))
-                self.wgts.calib_range.skips = sorted(set(wgts_calib_range_skips) - wgts_skip_set)
+                self.wgts.calib_range.skips = sorted(
+                    set(wgts_calib_range_skips) - wgts_skip_set
+                )
             if self.extra_wgts is not None:
                 extra_includes = []
                 for include in self.extra_wgts.includes:
@@ -479,12 +565,16 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
                 ipts_calib_range_skips = []
                 for skip in self.ipts.calib_range.skips:
                     ipts_calib_range_skips.extend(list(key_map[skip]))
-                self.ipts.calib_range.skips = sorted(set(ipts_calib_range_skips) - ipts_skip_set)
+                self.ipts.calib_range.skips = sorted(
+                    set(ipts_calib_range_skips) - ipts_skip_set
+                )
             if self.ipts.kernel_lzs is not None:
                 ipts_kernel_lzs_skips = []
                 for skip in self.ipts.kernel_lzs.skips:
                     ipts_kernel_lzs_skips.extend(list(key_map[skip]))
-                self.ipts.kernel_lzs.skips = sorted(set(ipts_kernel_lzs_skips) - ipts_skip_set)
+                self.ipts.kernel_lzs.skips = sorted(
+                    set(ipts_kernel_lzs_skips) - ipts_skip_set
+                )
         if self.opts is not None:
             opts_skips = []
             for skip in self.opts.skips:
@@ -495,12 +585,16 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
                 opts_calib_range_skips = []
                 for skip in self.opts.calib_range.skips:
                     opts_calib_range_skips.extend(list(key_map[skip]))
-                self.opts.calib_range.skips = sorted(set(opts_calib_range_skips) - opts_skip_set)
+                self.opts.calib_range.skips = sorted(
+                    set(opts_calib_range_skips) - opts_skip_set
+                )
         if self.smooth is not None and self.smooth.proj is not None:
             smooth_proj_skips = []
             for skip in self.smooth.proj.skips:
                 smooth_proj_skips.extend(list(key_map[skip]))
-            self.smooth.proj.skips = sorted(set(smooth_proj_skips) - (wgts_skip_set & ipts_skip_set))
+            self.smooth.proj.skips = sorted(
+                set(smooth_proj_skips) - (wgts_skip_set & ipts_skip_set)
+            )
         if self.rotation is not None:
             rotation_transforms = []
             for transform in self.rotation.transforms:

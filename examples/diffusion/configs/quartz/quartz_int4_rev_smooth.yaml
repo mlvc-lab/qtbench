@@ -9,8 +9,8 @@ quant:
       spans:
       - - AbsMax
         - AbsMax
-      reverse: false
-      alpha: 0.5
+      reverse: true
+      alpha: 0.0
       beta: -2
       num_grids: 20
       allow_low_rank: false

@@ -66,6 +66,8 @@ class SmoothCalibConfig(SearchBasedCalibConfig):
             Whether to allow the quantization for beta tensor.
         spans (`list[tuple[SmoothSpanMode, SmoothSpanMode]]`, *optional*, default=`[]`):
             The span combinations. The first element is for the alpha and the second element is for the beta.
+        reverse (`bool`, *optional*, default=`False`):
+            Whether to enable reverse search for alpha and beta.
         alpha (`float`, *optional*, default=`0.5`):
             The smoothing alpha.
         beta (`float`, *optional*, default=`-1`):
@@ -92,6 +94,7 @@ class SmoothCalibConfig(SearchBasedCalibConfig):
     )
     a_spans: list[SmoothSpanMode] = field(default_factory=list, init=False)
     b_spans: list[SmoothSpanMode] = field(default_factory=list, init=False)
+    reverse: bool = False
     alpha: float = 0.5
     beta: float = -1
     num_grids: int = 20
@@ -148,15 +151,19 @@ class SmoothCalibConfig(SearchBasedCalibConfig):
             `list[tuple[float, float]]`:
                 The alpha and beta pair candidates.
         """
+        _min = -1.0 if self.reverse else 0.0
         if self.strategy == SearchBasedCalibStrategy.Manual:
-            assert -1 <= self.alpha <= 1 and -1 <= self.beta <= 1
+            assert _min <= self.alpha <= 1 and _min <= self.beta <= 1
             return [(self.alpha, self.beta)]
-        clamp = lambda v: max(-1.0, min(1.0, v))
-        choices = [
-            i / self.num_grids
-            for i in range(-self.num_grids, self.num_grids + 1)
-            if i != 0
-        ]
+        clamp = lambda v: max(_min, min(1.0, v))
+        if self.reverse:
+            choices = [
+                i / self.num_grids
+                for i in range(-self.num_grids, self.num_grids + 1)
+                if i != 0
+            ]
+        else:
+            choices = [i / self.num_grids for i in range(1, self.num_grids + 1)]
         if self.alpha > 0:
             if self.beta > 0:
                 return [(0, 0)] + [(clamp(alpha), clamp(alpha)) for alpha in choices]
@@ -288,6 +295,8 @@ class SmoothCalibConfig(SearchBasedCalibConfig):
             names.append(f"g{self.num_grids}.a{alpha}")
         else:
             names.append(f"g{self.num_grids}.a{alpha}.b{beta}")
+        if self.reverse:
+            names.append(".rev")
         if self.allow_low_rank:
             names[-1] += ".lr"
         if not self.fuse_when_possible:
