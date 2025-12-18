@@ -84,7 +84,9 @@ class SmoothCalibConfig(SearchBasedCalibConfig):
         metadata={
             omniconfig.ARGPARSE_KWARGS: {
                 "nargs": "+",
-                "type": lambda s: tuple(SmoothSpanMode[x.split(".")[-1]] for x in s.split(",")),
+                "type": lambda s: tuple(
+                    SmoothSpanMode[x.split(".")[-1]] for x in s.split(",")
+                ),
             }
         },
     )
@@ -104,8 +106,12 @@ class SmoothCalibConfig(SearchBasedCalibConfig):
                 a_span = SmoothSpanMode[a_span]
             if isinstance(b_span, str):
                 b_span = SmoothSpanMode[b_span]
-            assert isinstance(a_span, SmoothSpanMode), f"Invalid span mode used for alpha: {a_span}"
-            assert isinstance(b_span, SmoothSpanMode), f"Invalid span mode used for beta: {b_span}"
+            assert isinstance(
+                a_span, SmoothSpanMode
+            ), f"Invalid span mode used for alpha: {a_span}"
+            assert isinstance(
+                b_span, SmoothSpanMode
+            ), f"Invalid span mode used for beta: {b_span}"
             _span = (a_span, b_span)
             if _span in _spanset:
                 continue
@@ -120,8 +126,12 @@ class SmoothCalibConfig(SearchBasedCalibConfig):
         self.spans = _spans
         # endregion
         if self.strategy == SearchBasedCalibStrategy.Manual:
-            assert len(self.spans) == 1, "Only one span combination is allowed in manual mode"
-            assert self.alpha != 0 or self.beta != 0, "alpha and beta cannot be both zero"
+            assert (
+                len(self.spans) == 1
+            ), "Only one span combination is allowed in manual mode"
+            assert (
+                self.alpha != 0 or self.beta != 0
+            ), "alpha and beta cannot be both zero"
             self.alpha, self.beta = self.get_alpha_beta_pairs()[0]
         if self.granularity == SearchBasedCalibGranularity.Group:
             self.granularity = SearchBasedCalibGranularity.ChannelGroup
@@ -139,85 +149,114 @@ class SmoothCalibConfig(SearchBasedCalibConfig):
                 The alpha and beta pair candidates.
         """
         if self.strategy == SearchBasedCalibStrategy.Manual:
-            if self.beta < 0:
-                assert 0 <= self.alpha <= 1, "alpha must be in [0, 1]"
-                return [(self.alpha, 1 - self.alpha)]
-            elif self.alpha < 0:
-                assert 0 <= self.beta <= 1, "beta must be in [0, 1]"
-                return [(1 - self.beta, self.beta)]
-            else:
-                assert 0 <= self.alpha <= 1, "alpha must be in [0, 1]"
-                assert 0 <= self.beta <= 1, "beta must be in [0, 1]"
-                return [(self.alpha, self.beta)]
-        choices = [i / self.num_grids for i in range(1, self.num_grids)]
+            assert -1 <= self.alpha <= 1 and -1 <= self.beta <= 1
+            return [(self.alpha, self.beta)]
+        clamp = lambda v: max(-1.0, min(1.0, v))
+        choices = [
+            i / self.num_grids
+            for i in range(-self.num_grids, self.num_grids + 1)
+            if i != 0
+        ]
         if self.alpha > 0:
             if self.beta > 0:
-                return [(0, 0)] + [(alpha, alpha) for alpha in choices]
+                return [(0, 0)] + [(clamp(alpha), clamp(alpha)) for alpha in choices]
             if self.beta == 0:
-                return [(0, 0)] + [(alpha, 0) for alpha in choices]
+                return [(0, 0)] + [(clamp(alpha), 0) for alpha in choices]
             if self.beta == -1:
-                return [(0, 0)] + [(alpha, 1 - alpha) for alpha in choices]
+                return [(0, 0)] + [
+                    (clamp(alpha), clamp(1 - alpha)) for alpha in choices
+                ]
             if self.beta == -2:
-                return [(0, 0)] + [(alpha, 0) for alpha in choices] + [(alpha, 1 - alpha) for alpha in choices]
+                return (
+                    [(0, 0)]
+                    + [(clamp(alpha), 0) for alpha in choices]
+                    + [(clamp(alpha), clamp(1 - alpha)) for alpha in choices]
+                )
             return (
-                [(0, 0)] + [(alpha, 0) for alpha in choices] + [(alpha, beta) for alpha in choices for beta in choices]
+                [(0, 0)]
+                + [(clamp(alpha), 0) for alpha in choices]
+                + [(clamp(alpha), clamp(beta)) for alpha in choices for beta in choices]
             )
         if self.alpha == 0:
             if self.beta > 0:
-                return [(0, 0)] + [(0, beta) for beta in choices]
+                return [(0, 0)] + [(0, clamp(beta)) for beta in choices]
             if self.beta == 0:
-                return [(0, 0)] + [(alpha, 0) for alpha in choices] + [(0, beta) for beta in choices]
+                return (
+                    [(0, 0)]
+                    + [(clamp(alpha), 0) for alpha in choices]
+                    + [(0, clamp(beta)) for beta in choices]
+                )
             if self.beta == -1:
-                return [(0, 0)] + [(0, beta) for beta in choices] + [(alpha, 1 - alpha) for alpha in choices]
+                return (
+                    [(0, 0)]
+                    + [(0, clamp(beta)) for beta in choices]
+                    + [(clamp(alpha), clamp(1 - alpha)) for alpha in choices]
+                )
             if self.beta == -2:
                 return (
                     [(0, 0)]
-                    + [(alpha, 0) for alpha in choices]
-                    + [(0, beta) for beta in choices]
-                    + [(alpha, 1 - alpha) for alpha in choices]
+                    + [(clamp(alpha), 0) for alpha in choices]
+                    + [(0, clamp(beta)) for beta in choices]
+                    + [(clamp(alpha), clamp(1 - alpha)) for alpha in choices]
                 )
             return (
                 [(0, 0)]
-                + [(alpha, 0) for alpha in choices]
-                + [(0, beta) for beta in choices]
-                + [(alpha, beta) for alpha in choices for beta in choices]
+                + [(clamp(alpha), 0) for alpha in choices]
+                + [(0, clamp(beta)) for beta in choices]
+                + [(clamp(alpha), clamp(beta)) for alpha in choices for beta in choices]
             )
         if self.alpha == -1:
             if self.beta > 0 or self.beta == -1:
-                return [(0, 0)] + [(alpha, 1 - alpha) for alpha in choices]
-            if self.beta == 0 or self.beta == -2:
-                return [(0, 0)] + [(alpha, 0) for alpha in choices] + [(alpha, 1 - alpha) for alpha in choices]
-            return (
-                [(0, 0)] + [(alpha, 0) for alpha in choices] + [(alpha, beta) for alpha in choices for beta in choices]
-            )
-        if self.alpha == -2:
-            if self.beta > 0 or self.beta == -1:
-                return [(0, 0)] + [(0, beta) for beta in choices] + [(alpha, 1 - alpha) for alpha in choices]
+                return [(0, 0)] + [
+                    (clamp(alpha), clamp(1 - alpha)) for alpha in choices
+                ]
             if self.beta == 0 or self.beta == -2:
                 return (
                     [(0, 0)]
-                    + [(alpha, 0) for alpha in choices]
-                    + [(0, beta) for beta in choices]
-                    + [(alpha, 1 - alpha) for alpha in choices]
+                    + [(clamp(alpha), 0) for alpha in choices]
+                    + [(clamp(alpha), clamp(1 - alpha)) for alpha in choices]
                 )
             return (
                 [(0, 0)]
-                + [(alpha, 0) for alpha in choices]
-                + [(0, beta) for beta in choices]
-                + [(alpha, beta) for alpha in choices for beta in choices]
+                + [(clamp(alpha), 0) for alpha in choices]
+                + [(clamp(alpha), clamp(beta)) for alpha in choices for beta in choices]
+            )
+        if self.alpha == -2:
+            if self.beta > 0 or self.beta == -1:
+                return (
+                    [(0, 0)]
+                    + [(0, clamp(beta)) for beta in choices]
+                    + [(clamp(alpha), clamp(1 - alpha)) for alpha in choices]
+                )
+            if self.beta == 0 or self.beta == -2:
+                return (
+                    [(0, 0)]
+                    + [(clamp(alpha), 0) for alpha in choices]
+                    + [(0, clamp(beta)) for beta in choices]
+                    + [(clamp(alpha), clamp(1 - alpha)) for alpha in choices]
+                )
+            return (
+                [(0, 0)]
+                + [(clamp(alpha), 0) for alpha in choices]
+                + [(0, clamp(beta)) for beta in choices]
+                + [(clamp(alpha), clamp(beta)) for alpha in choices for beta in choices]
             )
         if self.alpha == -3:
             if self.beta > 0:
                 return (
                     [(0, 0)]
-                    + [(0, beta) for beta in choices]
-                    + [(alpha, beta) for alpha in choices for beta in choices]
+                    + [(0, clamp(beta)) for beta in choices]
+                    + [
+                        (clamp(alpha), clamp(beta))
+                        for alpha in choices
+                        for beta in choices
+                    ]
                 )
             return (
                 [(0, 0)]
-                + [(0, beta) for beta in choices]
-                + [(alpha, 0) for alpha in choices]
-                + [(alpha, beta) for alpha in choices for beta in choices]
+                + [(0, clamp(beta)) for beta in choices]
+                + [(clamp(alpha), 0) for alpha in choices]
+                + [(clamp(alpha), clamp(beta)) for alpha in choices for beta in choices]
             )
         raise ValueError("Invalid alpha and beta values")
 
@@ -233,7 +272,13 @@ class SmoothCalibConfig(SearchBasedCalibConfig):
                 The directory names of the configuration.
         """
         names = super().generate_dirnames(**kwargs)
-        names.append("[{}]".format("+".join(f"a.{a_span.name}.b.{b_span.name}" for a_span, b_span in self.spans)))
+        names.append(
+            "[{}]".format(
+                "+".join(
+                    f"a.{a_span.name}.b.{b_span.name}" for a_span, b_span in self.spans
+                )
+            )
+        )
         alpha, beta = num2str(self.alpha), num2str(self.beta)
         if self.strategy == SearchBasedCalibStrategy.Manual:
             names.append(f"a{alpha}.b{beta}")
@@ -336,8 +381,12 @@ class SmoothAttentionCalibConfig(SmoothCalibConfig):
             The number of grids for grid search.
     """
 
-    objective: SearchBasedCalibObjective = field(init=False, default=SearchBasedCalibObjective.OutputsError)
-    granularity: SearchBasedCalibGranularity = field(init=False, default=SearchBasedCalibGranularity.Layer)
+    objective: SearchBasedCalibObjective = field(
+        init=False, default=SearchBasedCalibObjective.OutputsError
+    )
+    granularity: SearchBasedCalibGranularity = field(
+        init=False, default=SearchBasedCalibGranularity.Layer
+    )
     element_batch_size: int = field(init=False, default=-1)
     element_size: int = field(init=False, default=-1)
     pre_reshape: bool = field(init=False, default=True)
@@ -380,8 +429,12 @@ class SmoothTransfomerConfig:
             `list[str]`:
                 The names of the smooth quantization configuration
         """
-        proj_names = self.proj.generate_dirnames(prefix="proj") if self.proj is not None else []
-        attn_names = self.attn.generate_dirnames(prefix="attn") if self.attn is not None else []
+        proj_names = (
+            self.proj.generate_dirnames(prefix="proj") if self.proj is not None else []
+        )
+        attn_names = (
+            self.attn.generate_dirnames(prefix="attn") if self.attn is not None else []
+        )
         num_names = max(len(proj_names), len(attn_names))
         names = []
         for index in range(num_names):

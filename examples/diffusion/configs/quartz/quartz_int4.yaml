@@ -2,11 +2,27 @@ quant:
   enable_smooth: false
   wgts:
     enable_low_rank: false
+    dtype: sint4
+    group_shapes:
+    - - 1
+      - 64
+      - 1
+    scale_dtypes:
+    - null
   ipts:
+    static: false
     dtype: sint8
+    group_shapes:
+    - - 1
+      - 64
+      - 1
+    scale_dtypes:
+    - null
+    allow_unsigned: true
     enable_kernel_lzs: true
     kernel_lzs:
       bits: 4
       base: 8
-      group_size: 16
-
+      group_size: 32
+pipeline:
+  shift_activations: true
