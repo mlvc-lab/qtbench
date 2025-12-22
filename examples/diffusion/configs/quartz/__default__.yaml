@@ -1,5 +1,4 @@
 quant:
-  enable_smooth: false
   wgts:
     dtype: sint4
     enable_low_rank: false
@@ -23,6 +22,7 @@ quant:
     scale_dtypes:
       - null
     allow_unsigned: true
+    enable_kernel_lzs: true
 pipeline:
   shift_activations: true
 

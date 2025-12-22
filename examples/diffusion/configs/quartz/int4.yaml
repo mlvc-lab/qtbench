@@ -1,0 +1,7 @@
+quant:
+  ipts:
+    dtype: sint8
+    kernel_lzs:
+      bits: 4
+      base: 8
+      group_size: 32
