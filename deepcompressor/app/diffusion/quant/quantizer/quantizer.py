@@ -23,7 +23,11 @@ from .config import (
     DiffusionWeightQuantizerConfig,
 )
 
-__all__ = ["DiffusionQuantizer", "DiffusionWeightQuantizer", "DiffusionActivationQuantizer"]
+__all__ = [
+    "DiffusionQuantizer",
+    "DiffusionWeightQuantizer",
+    "DiffusionActivationQuantizer",
+]
 
 
 @dataclass
@@ -57,6 +61,9 @@ class DiffusionQuantizer(Quantizer):
         kernel (`DiffusionGPTQConfig` or `None`, *optional*, defaults to `MISSING`):
             The GPTQ kernel configuration.
             If not provided (i.e., `MISSING`), the GPTQ configuration from the `config` will be used.
+        lzs (`DiffusionLZSConfig` or `None`, *optional*, defaults to `MISSING`):
+            The LZS kernel configuration.
+            If not provided (i.e., `MISSING`), the LZS configuration from the `config` will be used.
         low_rank (`QuantLowRankConfig` or `None`, *optional*, defaults to `MISSING`):
             The quantization low-rank branch configuration.
             If not provided (i.e., `MISSING`), the low-rank branch configuration from the `config` will be used.
@@ -67,16 +74,14 @@ class DiffusionQuantizer(Quantizer):
     """
 
     config: DiffusionQuantizerConfig
-    kernel: DiffusionGPTQConfig | DiffusionLZSConfig | None = field(init=False)
+    kernel: DiffusionGPTQConfig | None = field(init=False)
+    lzs: DiffusionLZSConfig | None = field(init=False)
     low_rank: SkipBasedQuantLowRankCalibConfig | None = field(init=False)
     tensor_type: TensorType = TensorType.Weights
 
     def __post_init__(self) -> None:
         self.kernel = self.config.kernel_gptq
-        if self.config.kernel_gptq is not None:
-            self.kernel = self.config.kernel_gptq
-        else:
-            self.kernel = self.config.kernel_lzs
+        self.lzs = self.config.kernel_lzs
         self.low_rank = self.config.low_rank
 
     def calibrate_dynamic_range(
@@ -308,5 +313,9 @@ class DiffusionActivationQuantizer(DiffusionQuantizer):
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        assert self.tensor_type != TensorType.Weights, "The tensor type cannot be weights."
-        assert isinstance(self.channels_dim, int), "The channels dimension must be provided."
+        assert (
+            self.tensor_type != TensorType.Weights
+        ), "The tensor type cannot be weights."
+        assert isinstance(
+            self.channels_dim, int
+        ), "The channels dimension must be provided."

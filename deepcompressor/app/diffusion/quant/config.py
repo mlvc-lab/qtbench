@@ -178,6 +178,10 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
             quant_names.extend(
                 self.wgts.kernel_gptq.generate_dirnames(prefix="w.kernel")
             )
+        if self.enabled_wgts and self.wgts.enabled_lzs:
+            quant_names.extend(
+                self.wgts.kernel_lzs.generate_dirnames(prefix="w.kernel")
+            )
         acts_dirpath = ""
         if self.needs_acts_quantizer_cache:
             if self.enabled_ipts and self.ipts.needs_calib_data:
@@ -186,7 +190,7 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
                 )
             if self.enabled_ipts and self.ipts.enabled_lzs:
                 quant_names.extend(
-                    self.ipts.kernel_lzs.generate_dirnames(prefix="x.lzs")
+                    self.ipts.kernel_lzs.generate_dirnames(prefix="x.kernel")
                 )
             if self.enabled_opts and self.opts.needs_calib_data:
                 quant_names.extend(
@@ -448,8 +452,20 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
                     xrange_skips.add("[x]")
                 xrange_name += ".skip.[{}]".format("+".join(sorted(xrange_skips)))
         lzs_name = ""
+        if self.enabled_wgts and self.wgts.kernel_lzs is not None:
+            lzs_name = f"-lzs.w{self.wgts.kernel_lzs.group_size}"
+            if self.wgts.kernel_lzs.skips:
+                wgts_skips = simplify_skips(self.wgts.kernel_lzs.skips)
+                if "w" in skips_map and wgts_skips.issuperset(skips_map["w"]):
+                    wgts_skips = wgts_skips - skips_map["w"]
+                    wgts_skips.add("[w]")
+                lzs_name += ".skip.[{}]".format("+".join(sorted(wgts_skips)))
         if self.enabled_ipts and self.ipts.kernel_lzs is not None:
-            lzs_name = "-lzs"
+            lzs_name = (
+                f"-lzs.x{self.ipts.kernel_lzs.group_size}"
+                if not lzs_name
+                else lzs_name + f"+x{self.ipts.kernel_lzs.group_size}"
+            )
             if self.ipts.kernel_lzs.skips:
                 ipts_skips = simplify_skips(self.ipts.kernel_lzs.skips)
                 if "x" in skips_map and ipts_skips.issuperset(skips_map["x"]):

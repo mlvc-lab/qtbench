@@ -6,11 +6,18 @@ from dataclasses import dataclass, field
 import torch
 from omniconfig import configclass
 
-from deepcompressor.calib.config import SkipBasedDynamicRangeCalibConfig, SkipBasedQuantLowRankCalibConfig
+from deepcompressor.calib.config import (
+    SkipBasedDynamicRangeCalibConfig,
+    SkipBasedQuantLowRankCalibConfig,
+)
 from deepcompressor.data.dtype import QuantDataType
 from deepcompressor.quantizer.config import QuantizerConfig
 from deepcompressor.quantizer.kernel import QuantGptqConfig, QuantLzsConfig
-from deepcompressor.utils.config import EnableConfig, IncludeBasedConfig, SkipBasedConfig
+from deepcompressor.utils.config import (
+    EnableConfig,
+    IncludeBasedConfig,
+    SkipBasedConfig,
+)
 
 __all__ = [
     "DiffusionQuantizerConfig",
@@ -141,7 +148,9 @@ class DiffusionQuantizerConfig(QuantizerConfig):
             name += ".gptq"
         if self.enabled_low_rank:
             name += ".lowrank"
-        if self.enabled_calib_range and (self.calib_range.needs_search or self.calib_range.ratio != 1):
+        if self.enabled_calib_range and (
+            self.calib_range.needs_search or self.calib_range.ratio != 1
+        ):
             name += ".range"
         return name[1:] if name else ""
 
@@ -239,7 +248,9 @@ class DiffusionActivationQuantizerConfig(SkipBasedDiffusionQuantizerConfig):
 
     @property
     def needs_calib_data(self) -> bool:
-        return self.enabled_calib_range and (self.calib_range.needs_search or self.static)
+        return self.enabled_calib_range and (
+            self.calib_range.needs_search or self.static
+        )
 
     def generate_dirnames(
         self,
@@ -267,7 +278,9 @@ class DiffusionActivationQuantizerConfig(SkipBasedDiffusionQuantizerConfig):
                     - The name of the group shapes.
                     - The name of the modules to skip.
         """
-        names = super().generate_dirnames(prefix=prefix, shape=shape, default_dtype=default_dtype)
+        names = super().generate_dirnames(
+            prefix=prefix, shape=shape, default_dtype=default_dtype
+        )
         if self.allow_unsigned:
             names[1] += ".u"
         return names
@@ -318,9 +331,11 @@ class DiffusionExtraWeightQuantizerConfig(IncludeBasedConfig, DiffusionQuantizer
 
     static: bool = field(init=False, default=True)
     kernel_gptq: DiffusionGPTQConfig | None = field(init=False, default=None)
-    kernel_lzs: DiffusionLZSConfig | None = field(init=False, default=None)
+    # kernel_lzs: DiffusionLZSConfig | None = field(init=False, default=None)
     low_rank: SkipBasedQuantLowRankCalibConfig | None = field(init=False, default=None)
-    calib_range: SkipBasedDynamicRangeCalibConfig | None = field(init=False, default=None)
+    calib_range: SkipBasedDynamicRangeCalibConfig | None = field(
+        init=False, default=None
+    )
 
     @property
     def needs_calib_data(self) -> bool:
@@ -372,9 +387,13 @@ class DiffusionModuleQuantizerConfig(EnableConfig):
 
     def __post_init__(self) -> None:
         if self.enabled_opts:
-            raise NotImplementedError("Output activation quantization is not supported yet.")
+            raise NotImplementedError(
+                "Output activation quantization is not supported yet."
+            )
         if self.wgts.is_enabled() and self.extra_wgts is not None:
-            self.extra_wgts.includes = list(filter(lambda key: key not in self.wgts.skips, self.extra_wgts.includes))
+            self.extra_wgts.includes = list(
+                filter(lambda key: key not in self.wgts.skips, self.extra_wgts.includes)
+            )
             if self.extra_wgts.is_enabled():
                 self.extra_wgts.kernel_gptq = self.wgts.kernel_gptq
                 self.extra_wgts.low_rank = self.wgts.low_rank
@@ -410,16 +429,29 @@ class DiffusionModuleQuantizerConfig(EnableConfig):
                     - The name of the group shapes.
                     - The name of the modules to skip.
         """
-        wgts_names = self.wgts.generate_dirnames(prefix="w", shape=shape, default_dtype=default_dtype)
-        ipts_names = self.ipts.generate_dirnames(prefix="x", shape=shape, default_dtype=default_dtype)
-        opts_names = self.opts.generate_dirnames(prefix="y", shape=shape, default_dtype=default_dtype)
+        wgts_names = self.wgts.generate_dirnames(
+            prefix="w", shape=shape, default_dtype=default_dtype
+        )
+        ipts_names = self.ipts.generate_dirnames(
+            prefix="x", shape=shape, default_dtype=default_dtype
+        )
+        opts_names = self.opts.generate_dirnames(
+            prefix="y", shape=shape, default_dtype=default_dtype
+        )
         names = [
             f"{wgts_name}-{ipts_name}-{opts_name}"
-            for wgts_name, ipts_name, opts_name in zip(wgts_names, ipts_names, opts_names, strict=True)
+            for wgts_name, ipts_name, opts_name in zip(
+                wgts_names, ipts_names, opts_names, strict=True
+            )
         ]
         if self.extra_wgts is not None:
-            extra_wgts_names = self.extra_wgts.generate_dirnames(prefix="w", shape=shape, default_dtype=default_dtype)
-            names = [f"{name}-{extra_wgts_name}" for name, extra_wgts_name in zip(names, extra_wgts_names, strict=True)]
+            extra_wgts_names = self.extra_wgts.generate_dirnames(
+                prefix="w", shape=shape, default_dtype=default_dtype
+            )
+            names = [
+                f"{name}-{extra_wgts_name}"
+                for name, extra_wgts_name in zip(names, extra_wgts_names, strict=True)
+            ]
         if prefix:
             names = [f"{prefix}.[{name}]" for name in names]
         return names

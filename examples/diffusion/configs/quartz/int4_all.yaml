@@ -1,0 +1,14 @@
+quant:
+  wgts:
+    dtype: sint8
+    enable_kernel_lzs: true
+    kernel_lzs:
+      bits: 4
+      base: 8
+      group_size: 16
+  ipts:
+    dtype: sint8
+    kernel_lzs:
+      bits: 4
+      base: 8
+      group_size: 16
