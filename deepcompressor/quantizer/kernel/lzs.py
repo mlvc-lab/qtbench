@@ -14,6 +14,7 @@ from torch import nn
 from ...data.dtype import QuantDataType
 from ...data.range import QuantRange
 from ...data.zero import ZeroPointDomain
+from ...utils.common import num2str
 from ..config.kernel import BaseQuantKernel, BaseQuantKernelConfig
 from ..impl.ste import ste
 from .rtn import rtn_quantize
@@ -46,6 +47,20 @@ class QuantLzsConfig(BaseQuantKernelConfig):
 
     def build(self) -> "QuantLzsKernel":
         return QuantLzsKernel(self)
+
+    def generate_dirnames(self, *, prefix: str = "", **kwargs) -> list[str]:
+        """Generate the directory names of the configuration.
+
+        Args:
+            prefix (`str`, *optional*, defaults to `""`):
+                The prefix for the directory names.
+
+        Returns:
+            `list[str]`:
+                The directory names.
+        """
+        name = f"{num2str(self.base)}2{num2str(self.bits)}.g{num2str(self.group_size)}"
+        return [f"{prefix}.{name}" if prefix else name]
 
 
 class QuantLzsKernel(BaseQuantKernel):
@@ -132,8 +147,12 @@ def lzs_quantize(
         if outlier_id_mask.any():
             outlier_id_expanded = outlier_id_mask.unsqueeze(-1)
             groups_to_process = raw_x_groups
-            processed_values = ste(groups_to_process / round_value, torch.round) * round_value
-            raw_x_groups = torch.where(outlier_id_expanded, processed_values, raw_x_groups)
+            processed_values = (
+                ste(groups_to_process / round_value, torch.round) * round_value
+            )
+            raw_x_groups = torch.where(
+                outlier_id_expanded, processed_values, raw_x_groups
+            )
 
     raw_x_groups = torch.clamp(raw_x_groups, 0, 2**base - 1)
     processed_flat = raw_x_groups.flatten()
@@ -142,6 +161,8 @@ def lzs_quantize(
     processed_abs = processed_flat.view(original_shape)
 
     decompressed_x = processed_abs * sign
-    decompressed_x = ste(decompressed_x, torch.round).clamp(x_min, x_max).to(original_dtype)
+    decompressed_x = (
+        ste(decompressed_x, torch.round).clamp(x_min, x_max).to(original_dtype)
+    )
 
     return decompressed_x
