@@ -57,6 +57,8 @@ class DiffusionPtqRunConfig:
             Directory path to save the model checkpoint.
         copy_on_save (`bool`, *optional*, defaults to `False`):
             Whether to copy the quantization cache on save.
+        extract_mode (`bool`, *optional*, defaults to `False`):
+            Whether to extract activations and weights during the PTQ process.
     """
 
     cache: DiffusionPtqCacheConfig | None
@@ -74,6 +76,7 @@ class DiffusionPtqRunConfig:
     load_from: str = ""
     save_model: str = ""
     copy_on_save: bool = False
+    extract_mode: bool = False
 
     def __post_init__(self):
         # region set text encoder quanatization scale default dtype
