@@ -1,6 +1,6 @@
 quant:
   wgts:
-    dtype: sint4
+    dtype: cint8
     enable_low_rank: false
     group_shapes:
       - - 1
@@ -13,7 +13,7 @@ quant:
     enable_kernel_lzs: false
   ipts:
     static: false
-    dtype: sint4
+    dtype: cint8
     group_shapes:
       - - 1
         - 32

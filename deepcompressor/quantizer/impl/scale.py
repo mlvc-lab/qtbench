@@ -43,9 +43,13 @@ def quantize_scale(
     """
     scale = QuantScale()
     s = s.abs()
-    for view_shape, quant_dtype, quant_span in zip(view_shapes[:-1], quant_dtypes[:-1], quant_spans[:-1], strict=True):
+    for view_shape, quant_dtype, quant_span in zip(
+        view_shapes[:-1], quant_dtypes[:-1], quant_spans[:-1], strict=True
+    ):
         s = s.view(view_shape)  # (#g0, rs0, #g1, rs1, #g2, rs2, ...)
-        ss = s.amax(dim=list(range(1, len(view_shape), 2)), keepdim=True)  # i.e., s_dynamic_span
+        ss = s.amax(
+            dim=list(range(1, len(view_shape), 2)), keepdim=True
+        )  # i.e., s_dynamic_span
         ss = simple_quantize(
             ss / quant_span, has_zero_point=False, quant_dtype=quant_dtype
         )  # i.e., s_scale = s_dynamic_span / s_quant_span
@@ -55,7 +59,9 @@ def quantize_scale(
     s = s.view(view_shape)
     if any(v != 1 for v in view_shape[1::2]):
         ss = s.amax(dim=list(range(1, len(view_shape), 2)), keepdim=True)
-        ss = simple_quantize(ss / quant_spans[-1], has_zero_point=False, quant_dtype=quant_dtypes[-1])
+        ss = simple_quantize(
+            ss / quant_spans[-1], has_zero_point=False, quant_dtype=quant_dtypes[-1]
+        )
     else:
         assert quant_spans[-1] == 1, "The last quant span must be 1."
         ss = simple_quantize(s, has_zero_point=False, quant_dtype=quant_dtypes[-1])
@@ -101,32 +107,52 @@ class QuantScaleInfo:
             has_zero_point=self.has_zero_point,
             quant_range=self.tensor_quant_range,
         )
-        self.scale_quant_dtypes = ScaleUtils.infer_scale_dtypes(self.scale_quant_dtypes, self.default_quant_dtype)
-        self.exponent_scale_level = ScaleUtils.infer_exponent_scale_level(self.scale_quant_dtypes)
+        self.scale_quant_dtypes = ScaleUtils.infer_scale_dtypes(
+            self.scale_quant_dtypes, self.default_quant_dtype
+        )
+        self.exponent_scale_level = ScaleUtils.infer_exponent_scale_level(
+            self.scale_quant_dtypes
+        )
         if self.has_zero_point:
             if self.tensor_zero_domain == ZeroPointDomain.PreScale:
                 self.zero_quant_dtype = self.tensor_quant_dtype
             elif self.tensor_zero_domain == ZeroPointDomain.PostScale:
                 self.zero_quant_dtype = self.scale_quant_dtypes[-1]
-                if isinstance(self.zero_quant_dtype, QuantDataType) and self.zero_quant_dtype.is_exponent:
+                if (
+                    isinstance(self.zero_quant_dtype, QuantDataType)
+                    and self.zero_quant_dtype.is_exponent
+                ):
                     self.zero_quant_dtype = self.default_quant_dtype
             else:
-                raise ValueError(f"Unsupported zero point domain: {self.tensor_zero_domain}")
-            self.linear_tensor_quant_span = self.tensor_quant_range.max - self.tensor_quant_range.min
+                raise ValueError(
+                    f"Unsupported zero point domain: {self.tensor_zero_domain}"
+                )
+            self.linear_tensor_quant_span = (
+                self.tensor_quant_range.max - self.tensor_quant_range.min
+            )
             self.exponent_tensor_quant_span = 2 ** int(
-                math.log2(self.tensor_quant_range.max) + int(self.tensor_quant_dtype.signed)
+                math.log2(self.tensor_quant_range.max)
+                + int(self.tensor_quant_dtype.signed)
             )
         else:
             self.zero_quant_dtype = None
             self.linear_tensor_quant_span = self.tensor_quant_range.max
-            self.exponent_tensor_quant_span = 2 ** int(math.log2(self.tensor_quant_range.max))
-        if self.exponent_scale_level >= 0 and self.exponent_scale_level < len(self.scale_quant_dtypes):
+            self.exponent_tensor_quant_span = 2 ** int(
+                math.log2(self.tensor_quant_range.max)
+            )
+        if self.exponent_scale_level >= 0 and self.exponent_scale_level < len(
+            self.scale_quant_dtypes
+        ):
             lin_s_dtypes = self.scale_quant_dtypes[: self.exponent_scale_level]
             exp_s_dtypes = self.scale_quant_dtypes[self.exponent_scale_level :]
             lin_s_view_shapes = self.scale_view_shapes[: self.exponent_scale_level]
             exp_s_view_shapes = self.scale_view_shapes[self.exponent_scale_level :]
             exp_s_spans = ScaleUtils.infer_scale_quant_spans(exp_s_dtypes)
-            lin_s_spans = ScaleUtils.infer_scale_quant_spans(lin_s_dtypes, base=exp_s_spans[0]) if lin_s_dtypes else []
+            lin_s_spans = (
+                ScaleUtils.infer_scale_quant_spans(lin_s_dtypes, base=exp_s_spans[0])
+                if lin_s_dtypes
+                else []
+            )
         else:
             lin_s_dtypes, exp_s_dtypes = self.scale_quant_dtypes, []
             lin_s_view_shapes, exp_s_view_shapes = self.scale_view_shapes, []
@@ -178,7 +204,10 @@ class QuantScaleInfo:
                 is_float_point=self.tensor_quant_dtype.is_float_point,
             )
             dynamic_range = dynamic_range.intersect(self.tensor_range_bound)
-            dynamic_span = (dynamic_range.max - dynamic_range.min) if self.has_zero_point else dynamic_range.max
+            if self.tensor_quant_dtype.signed_min_max or self.has_zero_point:
+                dynamic_span = dynamic_range.max - dynamic_range.min
+            else:
+                dynamic_span = dynamic_range.max
         else:
             range_based = False
             scale = scale.view(self.scale_view_shapes[-1])
@@ -189,7 +218,9 @@ class QuantScaleInfo:
             if range_based:
                 linear_scale = dynamic_span / self.linear_tensor_quant_span
             elif self.exponent_scale_quant_dtypes:
-                linear_scale = scale.mul(self.exponent_tensor_quant_span).div(self.linear_tensor_quant_span)
+                linear_scale = scale.mul(self.exponent_tensor_quant_span).div(
+                    self.linear_tensor_quant_span
+                )
             else:
                 linear_scale = scale
             lin_s = quantize_scale(
@@ -205,12 +236,18 @@ class QuantScaleInfo:
             lin_s = QuantScale()
         if self.exponent_scale_quant_dtypes:
             if lin_s.data is not None:
-                lin_s.data = lin_s.data.expand(self.linear_scale_view_shapes[-1]).reshape(self.scale_view_shapes[-1])
+                lin_s.data = lin_s.data.expand(
+                    self.linear_scale_view_shapes[-1]
+                ).reshape(self.scale_view_shapes[-1])
             if range_based:
-                exp_span = dynamic_span if lin_s.data is None else dynamic_span / lin_s.data
+                exp_span = (
+                    dynamic_span if lin_s.data is None else dynamic_span / lin_s.data
+                )
                 exp_scale_dtype = exp_span.dtype
                 delta = 1 << (23 - self.tensor_quant_dtype.mantissa_bits - 1)
-                exp_span = (exp_span.to(torch.float32).view(torch.int32) + delta).view(torch.float32)
+                exp_span = (exp_span.to(torch.float32).view(torch.int32) + delta).view(
+                    torch.float32
+                )
                 exp_scale = exp_span / self.exponent_tensor_quant_span
                 exp_scale = exp_scale.to(exp_scale_dtype)
             else:
@@ -222,8 +259,12 @@ class QuantScaleInfo:
                 view_shapes=self.exponent_scale_view_shapes,
             )
             assert exp_s.data is not None, "Exponential scale tensor is None."
-            assert not exp_s.data.isnan().any(), "Exponential scale tensor contains NaN."
-            assert not exp_s.data.isinf().any(), "Exponential scale tensor contains Inf."
+            assert (
+                not exp_s.data.isnan().any()
+            ), "Exponential scale tensor contains NaN."
+            assert (
+                not exp_s.data.isinf().any()
+            ), "Exponential scale tensor contains Inf."
             s = exp_s if lin_s.data is None else lin_s.extend(exp_s)
         else:
             s = lin_s
@@ -239,7 +280,9 @@ class QuantScaleInfo:
                 else:
                     zero = self.tensor_quant_range.min * s.data - dynamic_range.min
             assert isinstance(zero, torch.Tensor), "Zero point must be a tensor."
-            z = simple_quantize(zero, has_zero_point=True, quant_dtype=self.zero_quant_dtype)
+            z = simple_quantize(
+                zero, has_zero_point=True, quant_dtype=self.zero_quant_dtype
+            )
         else:
             z = torch.tensor(0, dtype=s.data.dtype, device=s.data.device)
         assert not z.isnan().any(), "Zero point tensor contains NaN."

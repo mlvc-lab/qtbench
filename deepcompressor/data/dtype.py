@@ -27,6 +27,7 @@ class QuantDataType:
         magnitude: bool = False,
         codebook: Codebook | None = None,
         codebook_name: str = "",
+        signed_min_max: bool = False,
     ):
         """Initialize the quantization data type.
 
@@ -49,6 +50,10 @@ class QuantDataType:
                 Codebook for the data type.
             codebook_name (`str`, *optional*, defaults to `""`):
                 Name of the codebook. Must be specified if `codebook` is not `None`.
+            signed_min_max (`bool`, *optional*, defaults to `False`):
+                Whether to use signed min-max range for integer data type. If `True`, the range is
+                `[-2^(total_bits-1), 2^(total_bits-1)-1]` for signed data type but scaled using
+                min-max normalization.
         """
         self.__signed = signed
         # region set bit widths
@@ -56,9 +61,12 @@ class QuantDataType:
         self.__exponent_bits = exponent_bits
         assert self.__total_bits > 0, "Total bits must be greater than 0."
         assert self.__exponent_bits >= 0, "Exponent bits must be non-negative."
-        self.__mantissa_bits = self.__total_bits - self.__exponent_bits - int(self.__signed)
+        self.__mantissa_bits = (
+            self.__total_bits - self.__exponent_bits - int(self.__signed)
+        )
         # endregion
         # region set data type properties
+        self.__signed_min_max = signed_min_max
         if self.__exponent_bits > 0:
             # for floating-point data type
             self.__has_subnormal = has_subnormal
@@ -66,9 +74,13 @@ class QuantDataType:
             self.__has_nan = has_inf or has_nan
             self.__magnitude = True
             if self.__mantissa_bits == 0:
-                assert not self.__has_inf, "Inf is not supported for exponent-only floating-point data type."
+                assert (
+                    not self.__has_inf
+                ), "Inf is not supported for exponent-only floating-point data type."
                 if self.__exponent_bits == 1:
-                    assert not self.__has_nan, "NaN is not supported for 1-bit exponent-only floating-point data type."
+                    assert (
+                        not self.__has_nan
+                    ), "NaN is not supported for 1-bit exponent-only floating-point data type."
         else:
             # for integer data type
             self.__has_subnormal = False
@@ -78,7 +90,9 @@ class QuantDataType:
         # endregion
         # region set codebook
         if codebook is not None:
-            assert self.is_float_point, "Codebook is only supported for floating-point data type."
+            assert (
+                self.is_float_point
+            ), "Codebook is only supported for floating-point data type."
             self.__codebook = codebook
             assert codebook_name, "Codebook name must be specified."
             self.__codebook_name = codebook_name
@@ -88,21 +102,33 @@ class QuantDataType:
                 QuantDataType._registered[self.__name] = self
             else:
                 _registered = QuantDataType._registered[self.__name]
-                assert _registered.total_bits == self.total_bits, "Total bits must be the same as the registered one."
-                assert _registered.exponent_bits == self.exponent_bits, (
-                    "Exponent bits must be the same as the registered one."
-                )
-                assert _registered.signed == self.signed, "Signed must be the same as the registered one."
-                assert _registered.has_subnormal == self.has_subnormal, (
-                    "Subnormal must be the same as the registered one."
-                )
-                assert _registered.has_inf == self.has_inf, "Inf must be the same as the registered one."
-                assert _registered.has_nan == self.has_nan, "NaN must be the same as the registered one."
-                assert _registered.magnitude == self.magnitude, "Magnitude must be the same as the registered one."
-                assert _registered.__codebook is not None, "Codebook must be the same as the registered one."
-                assert torch.allclose(_registered.__codebook.values, self.__codebook.values), (
-                    "Codebook values must be the same as the registered one."
-                )
+                assert (
+                    _registered.total_bits == self.total_bits
+                ), "Total bits must be the same as the registered one."
+                assert (
+                    _registered.exponent_bits == self.exponent_bits
+                ), "Exponent bits must be the same as the registered one."
+                assert (
+                    _registered.signed == self.signed
+                ), "Signed must be the same as the registered one."
+                assert (
+                    _registered.has_subnormal == self.has_subnormal
+                ), "Subnormal must be the same as the registered one."
+                assert (
+                    _registered.has_inf == self.has_inf
+                ), "Inf must be the same as the registered one."
+                assert (
+                    _registered.has_nan == self.has_nan
+                ), "NaN must be the same as the registered one."
+                assert (
+                    _registered.magnitude == self.magnitude
+                ), "Magnitude must be the same as the registered one."
+                assert (
+                    _registered.__codebook is not None
+                ), "Codebook must be the same as the registered one."
+                assert torch.allclose(
+                    _registered.__codebook.values, self.__codebook.values
+                ), "Codebook values must be the same as the registered one."
         else:
             self.__codebook = None
             self.__codebook_name = ""
@@ -134,6 +160,10 @@ class QuantDataType:
     def unsigned(self) -> bool:
         """Whether the data type is unsigned."""
         return not self.__signed
+
+    def signed_min_max(self) -> bool:
+        """Whether to use signed min-max range for integer data type."""
+        return self.__signed_min_max
 
     @property
     def total_bits(self) -> int:
@@ -183,7 +213,11 @@ class QuantDataType:
     @property
     def is_exponent(self) -> bool:
         """Whether the data type is exponent-only floating-point."""
-        return self.exponent_bits > 0 and self.mantissa_bits == 0 and not self.has_subnormal
+        return (
+            self.exponent_bits > 0
+            and self.mantissa_bits == 0
+            and not self.has_subnormal
+        )
 
     @property
     def exponent_mask(self) -> int:
@@ -270,7 +304,11 @@ class QuantDataType:
     @property
     def max_value(self) -> float:
         """Maximum value."""
-        return self.max_positive_normal_value if self.__codebook is None else self.__codebook.values[-1].item()
+        return (
+            self.max_positive_normal_value
+            if self.__codebook is None
+            else self.__codebook.values[-1].item()
+        )
 
     @property
     def min_value(self) -> float:
@@ -296,7 +334,9 @@ class QuantDataType:
         """
         return QuantDataType.from_str("u" + self.name[1:])
 
-    def get_codebook(self, *, device: torch.device | str = "cpu", dtype: torch.dtype = torch.float32) -> Codebook:
+    def get_codebook(
+        self, *, device: torch.device | str = "cpu", dtype: torch.dtype = torch.float32
+    ) -> Codebook:
         """Get a get_codebook of `code_bits` bits for the quantization.
 
         Args:
@@ -342,7 +382,9 @@ class QuantDataType:
             cls._registered[s] = cls._default_from_str(s)
         return cls._registered[s]
 
-    def _build_codebook(self, *, device: torch.device | str = "cpu", dtype: torch.dtype = torch.float32) -> Codebook:
+    def _build_codebook(
+        self, *, device: torch.device | str = "cpu", dtype: torch.dtype = torch.float32
+    ) -> Codebook:
         if self.is_float_point:
             return Codebook.build_for_float_point(
                 total_bits=self.total_bits,
@@ -356,7 +398,11 @@ class QuantDataType:
             )
         else:
             return Codebook.build_for_integer(
-                total_bits=self.total_bits, signed=self.signed, magnitude=self.magnitude, device=device, dtype=dtype
+                total_bits=self.total_bits,
+                signed=self.signed,
+                magnitude=self.magnitude,
+                device=device,
+                dtype=dtype,
             )
 
     def _build_default_name(self) -> str:
@@ -367,8 +413,12 @@ class QuantDataType:
                 s += f"{self.total_bits}_e{self.exponent_bits}m{self.mantissa_bits}"
                 s += "_inf" if self.has_inf else ("_nan" if self.has_nan else "_all")
             else:
-                assert not self.has_subnormal, "Subnormal is not supported for exponent-only floating-point data type."
-                assert not self.has_inf, "Inf is not supported for exponent-only floating-point data type."
+                assert (
+                    not self.has_subnormal
+                ), "Subnormal is not supported for exponent-only floating-point data type."
+                assert (
+                    not self.has_inf
+                ), "Inf is not supported for exponent-only floating-point data type."
                 s += f"exp{self.exponent_bits}"
                 s += "_nan" if self.has_nan else "_all"
         else:
@@ -379,6 +429,8 @@ class QuantDataType:
     @staticmethod
     def _default_from_str(s: str, /) -> "QuantDataType":
         s = s.strip().lower()
+        if s.startswith("cint"):
+            return QuantDataType(int(s[4:]), signed=True, signed_min_max=True)
         signed = s[0] == "s"
         s = s[1:]
         if s.startswith("int"):
