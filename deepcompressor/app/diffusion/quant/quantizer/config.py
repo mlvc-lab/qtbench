@@ -146,6 +146,8 @@ class DiffusionQuantizerConfig(QuantizerConfig):
             name += ".static"
         if self.enabled_gptq:
             name += ".gptq"
+        if self.enabled_lzs:
+            name += ".lzs"
         if self.enabled_low_rank:
             name += ".lowrank"
         if self.enabled_calib_range and (

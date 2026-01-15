@@ -8,6 +8,7 @@ quant:
       group_size: 16
   ipts:
     dtype: sint8
+    enable_kernel_lzs: true
     kernel_lzs:
       bits: 4
       base: 8

@@ -74,14 +74,22 @@ class DiffusionQuantizer(Quantizer):
     """
 
     config: DiffusionQuantizerConfig
-    kernel: DiffusionGPTQConfig | None = field(init=False)
-    lzs: DiffusionLZSConfig | None = field(init=False)
+    kernel: DiffusionLZSConfig | None = field(init=False)
+    gptq: DiffusionGPTQConfig | None = field(init=False)
     low_rank: SkipBasedQuantLowRankCalibConfig | None = field(init=False)
     tensor_type: TensorType = TensorType.Weights
 
     def __post_init__(self) -> None:
-        self.kernel = self.config.kernel_gptq
-        self.lzs = self.config.kernel_lzs
+        if self.config.kernel_gptq is None and self.config.kernel_lzs is None:
+            self.kernel = None
+        elif self.config.kernel_gptq is not None and self.config.kernel_lzs is None::
+            self.kernel = self.config.kernel_gptq
+        elif self.config.kernel_gptq is None and self.config.kernel_lzs is not None:
+            self.kernel = self.config.kernel_lzs
+        else:
+            raise AssertionError(
+                "Only one of GPTQ or LZS kernel configuration should be provided."
+            )
         self.low_rank = self.config.low_rank
 
     def calibrate_dynamic_range(
