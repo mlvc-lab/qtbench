@@ -202,6 +202,7 @@ class QuantScaleInfo:
                 tensor.view(self.tensor_view_shape),
                 zero_domain=self.tensor_zero_domain,
                 is_float_point=self.tensor_quant_dtype.is_float_point,
+                is_signed_min_max=self.tensor_quant_dtype.signed_min_max,
             )
             dynamic_range = dynamic_range.intersect(self.tensor_range_bound)
             if self.tensor_quant_dtype.signed_min_max or self.has_zero_point:

@@ -82,7 +82,7 @@ class DiffusionQuantizer(Quantizer):
     def __post_init__(self) -> None:
         if self.config.kernel_gptq is None and self.config.kernel_lzs is None:
             self.kernel = None
-        elif self.config.kernel_gptq is not None and self.config.kernel_lzs is None::
+        elif self.config.kernel_gptq is not None and self.config.kernel_lzs is None:
             self.kernel = self.config.kernel_gptq
         elif self.config.kernel_gptq is None and self.config.kernel_lzs is not None:
             self.kernel = self.config.kernel_lzs

@@ -1,9 +1,9 @@
 seed: 12345
 enable_cache: true
 cache:
-  root: runs
+  root: final
 output:
-  root: runs
+  root: final
   dirname: default
 pipeline:
   dtype: torch.float16
@@ -20,13 +20,14 @@ eval:
   gen_root: "{output}/{job}"
   ref_root: baselines/{dtype}/{model}/{protocol}
   gt_stats_root: benchmarks/stats
-  num_gpus: 8
+  num_gpus: 4
   batch_size_per_gpu: 1
   chunk_start: 0
   chunk_step: 1
   benchmarks:
     - "MJHQ"
     - "DCI"
+    - "COCO"
   control_root: "benchmarks"
 quant:
   calib:

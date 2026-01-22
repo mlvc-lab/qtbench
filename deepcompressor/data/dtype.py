@@ -161,6 +161,7 @@ class QuantDataType:
         """Whether the data type is unsigned."""
         return not self.__signed
 
+    @property
     def signed_min_max(self) -> bool:
         """Whether to use signed min-max range for integer data type."""
         return self.__signed_min_max
@@ -407,6 +408,8 @@ class QuantDataType:
 
     def _build_default_name(self) -> str:
         s = "s" if self.signed else "u"
+        if self.signed_min_max:
+            s = "c"
         if self.is_float_point:
             if self.has_subnormal or self.mantissa_bits > 0:
                 s += "fp" if self.has_subnormal else "fn"

@@ -1,6 +1,7 @@
 quant:
   wgts:
-    dtype: cint8
+    dtype: uint8
+    zero_point: PreScale
     enable_low_rank: false
     group_shapes:
       - - 1
@@ -10,10 +11,10 @@ quant:
         - 1
     scale_dtypes:
       - null
-    enable_kernel_lzs: false
   ipts:
     static: false
-    dtype: cint8
+    dtype: uint8
+    zero_point: PreScale
     group_shapes:
       - - 1
         - 32
@@ -23,6 +24,3 @@ quant:
     scale_dtypes:
       - null
     allow_unsigned: true
-    enable_kernel_lzs: false
-pipeline:
-  shift_activations: true

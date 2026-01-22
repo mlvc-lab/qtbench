@@ -1,12 +1,14 @@
 pipeline:
   name: sdxl
+  dtype: torch.float32
 eval:
   num_steps: 50
   guidance_scale: 5
   protocol: euler{num_steps}-g{guidance_scale}
+  batch_size_per_gpu: 16
 quant:
   calib:
-    batch_size: 256
+    batch_size: 16
   wgts:
     skips: 
     - embed

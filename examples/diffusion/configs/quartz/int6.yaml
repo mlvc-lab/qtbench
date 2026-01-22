@@ -1,7 +1,0 @@
-quant:
-  ipts:
-    dtype: sint16
-    kernel_lzs:
-      bits: 6
-      base: 16
-      group_size: 32

@@ -17,5 +17,3 @@ quant:
     scale_dtypes:
     - null
     allow_unsigned: true
-pipeline:
-  shift_activations: true
