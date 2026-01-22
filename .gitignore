@@ -174,3 +174,7 @@ runs/
 exps/
 wandb
 wandb/
+
+examples/diffusion/final_result/
+examples/diffusion/figs/
+examples/diffusion/final/
