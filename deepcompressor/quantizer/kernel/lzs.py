@@ -94,10 +94,19 @@ class QuantLzsKernel(BaseQuantKernel):
         )
         if not use_lzs:
             return qtensor
-        return lzs_quantize(
-            qtensor,
-            lzs_config=self.config,
-        )
+        if zero_domain is not None:
+            # use unsigned LZS quantization
+            qtensor = lzs_quantize_unsigned(
+                qtensor,
+                lzs_config=self.config,
+            )
+        else:
+            # use signed LZS quantization
+            qtensor = lzs_quantize_signed(
+                qtensor,
+                lzs_config=self.config,
+            )
+        return qtensor
 
 
 def lzs_quantize(
@@ -166,3 +175,75 @@ def lzs_quantize(
     )
 
     return decompressed_x
+
+
+def lzs_quantize_signed(
+    x: torch.Tensor,
+    *,
+    lzs_config: QuantLzsConfig,
+) -> torch.Tensor:
+    """
+    Applies LZS quantization.
+    """
+
+    # sign + magnitude
+    sign = torch.sign(x)
+    a = torch.abs(x).clamp_max_(127)  # keep in INT8-like magnitude range
+
+    # MSB per element using frexp: MSB = exp for a>0 else 0
+    _, exp = torch.frexp(a)
+    msb = torch.where(a > 0, exp, torch.zeros_like(exp))  # same shape as a
+
+    # Block-wise max MSB (shared across last dim = block_size)
+    msb_blk = msb.amax(dim=-1, keepdim=True)
+
+    # Shared FLAG per block: max(MSB) - 3, clamped at 0
+    flag = (msb_blk - 3).clamp_min_(0)
+
+    # scale = 2^flag (shared per block)
+    scale = torch.ldexp(torch.ones_like(a), flag)
+
+    # quantize each element using shared scale
+    q = torch.round(a / scale).clamp_(0, 7) * scale
+    return sign * q
+
+
+def lzs_quantize_unsigned(
+    x: torch.Tensor,
+    *,
+    lzs_config: QuantLzsConfig,
+) -> torch.Tensor:
+    """
+    Applies LZS quantization.
+    """
+    """
+    Real per-block LZS (shared flag per block).
+    Expects x shaped [..., block_size]. Computes a single flag per block from max MSB in the block.
+
+    For bits=4, we keep a 4-bit mantissa [0..15] and a shared power-of-two shift per block.
+    """
+
+    original_shape = x.shape
+    original_dtype = x.dtype
+    sign = torch.sign(x)
+
+    x = x.view(-1, lzs_config.group_size)  # [..., block_size]
+    x = torch.clamp(x, min=0, max=2**lzs_config.base - 1)
+
+    # MSB per element using frexp: MSB = exp for a>0 else 0
+    _, exp = torch.frexp(x)
+    msb = torch.where(x > 0, exp, torch.zeros_like(exp))  # same shape as a
+
+    # Block-wise max MSB (shared across last dim = block_size)
+    msb_blk = msb.amax(dim=-1, keepdim=True)
+
+    # Shared FLAG per block: max(MSB) - 4, clamped at 0
+    flag = (msb_blk - 4).clamp_min_(0)
+
+    # scale = 2^flag (shared per block)
+    scale = torch.ldexp(torch.ones_like(x), flag)
+
+    # quantize each element using shared scale
+    q = torch.round(x / scale).clamp_(0, 15) * scale
+    q = q.view(original_shape).to(original_dtype)
+    return sign * q
