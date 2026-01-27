@@ -5,22 +5,30 @@ quant:
     enable_low_rank: false
     group_shapes:
       - - 1
-        - 32
+        - 64
         - 1
         - 1
         - 1
     scale_dtypes:
       - null
+    enable_kernel_gptq: false
+    # kernel_gptq:
+    #   damp_percentage: 0.01
+    #   block_size: 128
+    #   num_inv_tries: 250
+    #   hessian_block_size: 512
   ipts:
     static: false
-    dtype: uint8
-    zero_point: PreScale
+    dtype: uint8 # uint8
+    zero_point: PreScale #PreScale
     group_shapes:
       - - 1
-        - 32
+        - 64
         - 1
         - 1
         - 1
     scale_dtypes:
       - null
     allow_unsigned: true
+pipeline:
+  shift_activations: true

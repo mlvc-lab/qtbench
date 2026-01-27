@@ -15,6 +15,7 @@ from ...data.dtype import QuantDataType
 from ...data.range import QuantRange
 from ...data.zero import ZeroPointDomain
 from ...utils.common import num2str
+from ...utils.tools import logging
 from ..config.kernel import BaseQuantKernel, BaseQuantKernelConfig
 from ..impl.ste import ste
 from .rtn import rtn_quantize
@@ -94,18 +95,11 @@ class QuantLzsKernel(BaseQuantKernel):
         )
         if not use_lzs:
             return qtensor
-        if zero_domain is not None:
-            # use unsigned LZS quantization
-            qtensor = lzs_quantize_unsigned(
-                qtensor,
-                lzs_config=self.config,
-            )
-        else:
-            # use signed LZS quantization
-            qtensor = lzs_quantize_signed(
-                qtensor,
-                lzs_config=self.config,
-            )
+        qtensor = lzs_quantize(
+            qtensor,
+            lzs_config=self.config,
+            is_signed=quant_dtype.signed,
+        )
         return qtensor
 
 
@@ -113,6 +107,7 @@ def lzs_quantize(
     x: torch.Tensor,
     *,
     lzs_config: QuantLzsConfig,
+    is_signed: bool = True,
 ) -> torch.Tensor:
     """
     Applies LZS quantization.
@@ -149,7 +144,7 @@ def lzs_quantize(
     max_dim1, _ = raw_x_groups.max(dim=1)
 
     for bit in range(bits, base):
-        mul_xth = 2 ** (bit - 1)  # if is_processed_symmetric else (2**bit)
+        mul_xth = 2 ** (bit - 1) if is_signed else (2**bit)
         round_value = 2 ** (bit + 1 - bits)
         outlier_id_mask = torch.bitwise_and(max_dim1 >= mul_xth, max_dim1 < mul_xth * 2)
 
@@ -187,6 +182,8 @@ def lzs_quantize_signed(
     """
 
     # sign + magnitude
+    original_shape = x.shape
+    original_dtype = x.dtype
     sign = torch.sign(x)
     a = torch.abs(x).clamp_max_(127)  # keep in INT8-like magnitude range
 
@@ -205,6 +202,7 @@ def lzs_quantize_signed(
 
     # quantize each element using shared scale
     q = torch.round(a / scale).clamp_(0, 7) * scale
+    q = q.view(original_shape).to(original_dtype)
     return sign * q
 
 
@@ -228,7 +226,7 @@ def lzs_quantize_unsigned(
     sign = torch.sign(x)
 
     x = x.view(-1, lzs_config.group_size)  # [..., block_size]
-    x = torch.clamp(x, min=0, max=2**lzs_config.base - 1)
+    x = torch.clamp(x, min=0, max=255)
 
     # MSB per element using frexp: MSB = exp for a>0 else 0
     _, exp = torch.frexp(x)

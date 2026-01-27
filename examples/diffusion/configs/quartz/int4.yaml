@@ -4,4 +4,4 @@ quant:
     kernel_lzs:
       bits: 4
       base: 8
-      group_size: 32
+      group_size: 16

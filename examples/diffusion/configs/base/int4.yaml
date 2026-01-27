@@ -4,7 +4,7 @@ quant:
     enable_low_rank: false
     group_shapes:
       - - 1
-        - 32
+        - 64
         - 1
         - 1
         - 1
@@ -15,7 +15,7 @@ quant:
     dtype: sint4
     group_shapes:
       - - 1
-        - 32
+        - 64
         - 1
         - 1
         - 1
