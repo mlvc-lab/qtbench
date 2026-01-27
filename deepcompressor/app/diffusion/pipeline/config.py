@@ -69,7 +69,10 @@ class DiffusionPipelineConfig:
     """
 
     _pipeline_factories: tp.ClassVar[
-        dict[str, tp.Callable[[str, str, torch.dtype, torch.device, bool], DiffusionPipeline]]
+        dict[
+            str,
+            tp.Callable[[str, str, torch.dtype, torch.device, bool], DiffusionPipeline],
+        ]
     ] = {}
     _text_extractors: tp.ClassVar[
         dict[
@@ -84,7 +87,9 @@ class DiffusionPipelineConfig:
     name: str
     path: str = ""
     dtype: torch.dtype = field(
-        default_factory=lambda s=torch.float32: eval_dtype(s, with_quant_dtype=False, with_none=False)
+        default_factory=lambda s=torch.float32: eval_dtype(
+            s, with_quant_dtype=False, with_none=False
+        )
     )
     device: str = "cuda"
     shift_activations: bool = False
@@ -103,7 +108,10 @@ class DiffusionPipelineConfig:
             self.task = "inpainting"
 
     def build(
-        self, *, dtype: str | torch.dtype | None = None, device: str | torch.device | None = None
+        self,
+        *,
+        dtype: str | torch.dtype | None = None,
+        device: str | torch.device | None = None,
     ) -> DiffusionPipeline:
         """Build the diffusion pipeline.
 
@@ -123,11 +131,17 @@ class DiffusionPipelineConfig:
             device = self.device
         _factory = self._pipeline_factories.get(self.name, self._default_build)
         return _factory(
-            name=self.name, path=self.path, dtype=dtype, device=device, shift_activations=self.shift_activations
+            name=self.name,
+            path=self.path,
+            dtype=dtype,
+            device=device,
+            shift_activations=self.shift_activations,
         )
 
     def extract_text_encoders(
-        self, pipeline: DiffusionPipeline, supported: tuple[type[PreTrainedModel], ...] = (T5EncoderModel,)
+        self,
+        pipeline: DiffusionPipeline,
+        supported: tuple[type[PreTrainedModel], ...] = (T5EncoderModel,),
     ) -> list[tuple[str, PreTrainedModel, PreTrainedTokenizer]]:
         """Extract the text encoders and tokenizers from the pipeline.
 
@@ -141,7 +155,9 @@ class DiffusionPipelineConfig:
             `list[tuple[str, PreTrainedModel, PreTrainedTokenizer]]`:
                 The list of text encoder name, model, and tokenizer.
         """
-        _extractor = self._text_extractors.get(self.name, self._default_extract_text_encoders)
+        _extractor = self._text_extractors.get(
+            self.name, self._default_extract_text_encoders
+        )
         return _extractor(pipeline, supported)
 
     @classmethod
@@ -149,7 +165,9 @@ class DiffusionPipelineConfig:
         cls,
         names: str | tuple[str, ...],
         /,
-        factory: tp.Callable[[str, str, torch.dtype, torch.device, bool], DiffusionPipeline],
+        factory: tp.Callable[
+            [str, str, torch.dtype, torch.device, bool], DiffusionPipeline
+        ],
         *,
         overwrite: bool = False,
     ) -> None:
@@ -200,7 +218,9 @@ class DiffusionPipelineConfig:
             cls._text_extractors[name] = extractor
 
     def load_lora(  # noqa: C901
-        self, pipeline: DiffusionPipeline, smooth_cache: dict[str, torch.Tensor] | None = None
+        self,
+        pipeline: DiffusionPipeline,
+        smooth_cache: dict[str, torch.Tensor] | None = None,
     ) -> DiffusionPipeline:
         smooth_cache = smooth_cache or {}
         model = pipeline.unet if hasattr(pipeline, "unet") else pipeline.transformer
@@ -214,7 +234,10 @@ class DiffusionPipelineConfig:
             tools.logging.Formatter.indent_inc()
             for name, module in model.named_modules():
                 if isinstance(module, (nn.Linear, ConcatLinear, ShiftedLinear)):
-                    lora_a_key, lora_b_key = f"transformer.{name}.lora_A.weight", f"transformer.{name}.lora_B.weight"
+                    lora_a_key, lora_b_key = (
+                        f"transformer.{name}.lora_A.weight",
+                        f"transformer.{name}.lora_B.weight",
+                    )
                     if lora_a_key in lora_state_dict:
                         assert lora_b_key in lora_state_dict
                         logger.info(f"+ Load LoRA branch for {name}")
@@ -238,34 +261,54 @@ class DiffusionPipelineConfig:
                             assert a.shape[0] == b.shape[1]
                             if isinstance(m, ShiftedLinear):
                                 s, m = m.shift, m.linear
-                                logger.debug(f"- shift LoRA input by {s.item() if s.numel() == 1 else s}")
+                                logger.debug(
+                                    f"- shift LoRA input by {s.item() if s.numel() == 1 else s}"
+                                )
                             else:
                                 s = None
                             assert isinstance(m, nn.Linear)
                             device, dtype = m.weight.device, m.weight.dtype
-                            a, b = a.to(device=device, dtype=torch.float64), b.to(device=device, dtype=torch.float64)
+                            a, b = a.to(device=device, dtype=torch.float64), b.to(
+                                device=device, dtype=torch.float64
+                            )
                             if s is not None:
                                 if s.numel() == 1:
-                                    s = torch.matmul(b, a.sum(dim=1).mul_(s.double())).mul_(self.lora.alpha)
+                                    s = torch.matmul(
+                                        b, a.sum(dim=1).mul_(s.double())
+                                    ).mul_(self.lora.alpha)
                                 else:
-                                    s = torch.matmul(b, torch.matmul(a, s.view(1, -1).double())).mul_(self.lora.alpha)
+                                    s = torch.matmul(
+                                        b, torch.matmul(a, s.view(1, -1).double())
+                                    ).mul_(self.lora.alpha)
                             if hasattr(m, "in_smooth_cache_key"):
-                                logger.debug(f"- smooth LoRA input using {m.in_smooth_cache_key} smooth scale")
-                                ss = smooth_cache[m.in_smooth_cache_key].to(device=device, dtype=torch.float64)
+                                logger.debug(
+                                    f"- smooth LoRA input using {m.in_smooth_cache_key} smooth scale"
+                                )
+                                ss = smooth_cache[m.in_smooth_cache_key].to(
+                                    device=device, dtype=torch.float64
+                                )
                                 a = a.mul_(ss.view(1, -1))
                                 del ss
                             if hasattr(m, "out_smooth_cache_key"):
-                                logger.debug(f"- smooth LoRA output using {m.out_smooth_cache_key} smooth scale")
-                                ss = smooth_cache[m.out_smooth_cache_key].to(device=device, dtype=torch.float64)
+                                logger.debug(
+                                    f"- smooth LoRA output using {m.out_smooth_cache_key} smooth scale"
+                                )
+                                ss = smooth_cache[m.out_smooth_cache_key].to(
+                                    device=device, dtype=torch.float64
+                                )
                                 b = b.div_(ss.view(-1, 1))
                                 if s is not None:
                                     s = s.div_(ss.view(-1))
                                 del ss
                             branch_hook, quant_hook = None, None
                             for hook in m._forward_pre_hooks.values():
-                                if isinstance(hook, AccumBranchHook) and isinstance(hook.branch, LowRankBranch):
+                                if isinstance(hook, AccumBranchHook) and isinstance(
+                                    hook.branch, LowRankBranch
+                                ):
                                     branch_hook = hook
-                                if isinstance(hook, ProcessHook) and isinstance(hook.processor, Quantizer):
+                                if isinstance(hook, ProcessHook) and isinstance(
+                                    hook.processor, Quantizer
+                                ):
                                     quant_hook = hook
                             if branch_hook is not None:
                                 logger.debug("- fuse with existing LoRA branch")
@@ -273,8 +316,14 @@ class DiffusionPipelineConfig:
                                 _a = branch_hook.branch.a.weight.data
                                 _b = branch_hook.branch.b.weight.data
                                 if branch_hook.branch.alpha != self.lora.alpha:
-                                    a, b = a.to(dtype=dtype), b.mul_(self.lora.alpha).to(dtype=dtype)
-                                    _b = _b.to(dtype=torch.float64).mul_(branch_hook.branch.alpha).to(dtype=dtype)
+                                    a, b = a.to(dtype=dtype), b.mul_(
+                                        self.lora.alpha
+                                    ).to(dtype=dtype)
+                                    _b = (
+                                        _b.to(dtype=torch.float64)
+                                        .mul_(branch_hook.branch.alpha)
+                                        .to(dtype=dtype)
+                                    )
                                     alpha = 1
                                 else:
                                     a, b = a.to(dtype=dtype), b.to(dtype=dtype)
@@ -292,19 +341,26 @@ class DiffusionPipelineConfig:
                             else:
                                 logger.debug("- create a new LoRA branch")
                                 branch = LowRankBranch(
-                                    m.in_features, m.out_features, rank=a.shape[0], alpha=self.lora.alpha
+                                    m.in_features,
+                                    m.out_features,
+                                    rank=a.shape[0],
+                                    alpha=self.lora.alpha,
                                 )
                                 branch = branch.to(device=device, dtype=dtype)
                                 branch.a.weight.data.copy_(a.to(dtype=dtype))
                                 branch.b.weight.data.copy_(b.to(dtype=dtype))
                                 # low rank branch hook should be registered before the quantization hook
                                 if quant_hook is not None:
-                                    logger.debug(f"- remove quantization hook from {name}")
+                                    logger.debug(
+                                        f"- remove quantization hook from {name}"
+                                    )
                                     quant_hook.remove(m)
                                 logger.debug(f"- register LoRA branch to {name}")
                                 branch.as_hook().register(m)
                                 if quant_hook is not None:
-                                    logger.debug(f"- re-register quantization hook to {name}")
+                                    logger.debug(
+                                        f"- re-register quantization hook to {name}"
+                                    )
                                     quant_hook.register(m)
                             if s is not None:
                                 assert m.bias is not None
@@ -319,13 +375,19 @@ class DiffusionPipelineConfig:
         branches = nn.ModuleList()
         for _, module in model.named_modules():
             for hook in module._forward_hooks.values():
-                if isinstance(hook, AccumBranchHook) and isinstance(hook.branch, LowRankBranch):
+                if isinstance(hook, AccumBranchHook) and isinstance(
+                    hook.branch, LowRankBranch
+                ):
                     branches.append(hook.branch)
         model.register_module("_low_rank_branches", branches)
 
     @staticmethod
     def _default_build(
-        name: str, path: str, dtype: str | torch.dtype, device: str | torch.device, shift_activations: bool
+        name: str,
+        path: str,
+        dtype: str | torch.dtype,
+        device: str | torch.device,
+        shift_activations: bool,
     ) -> DiffusionPipeline:
         if not path:
             if name == "sdxl":
@@ -344,6 +406,8 @@ class DiffusionPipelineConfig:
                 path = "black-forest-labs/FLUX.1-Fill-dev"
             elif name == "flux.1-schnell":
                 path = "black-forest-labs/FLUX.1-schnell"
+            elif name == "dit":
+                path = "facebook/DiT-XL-2-256"
             else:
                 raise ValueError(f"Path for {name} is not specified.")
         if name in ["flux.1-canny-dev", "flux.1-depth-dev"]:
@@ -352,13 +416,17 @@ class DiffusionPipelineConfig:
             pipeline = FluxFillPipeline.from_pretrained(path, torch_dtype=dtype)
         elif name.startswith("sana-"):
             if dtype == torch.bfloat16:
-                pipeline = SanaPipeline.from_pretrained(path, variant="bf16", torch_dtype=dtype, use_safetensors=True)
+                pipeline = SanaPipeline.from_pretrained(
+                    path, variant="bf16", torch_dtype=dtype, use_safetensors=True
+                )
                 pipeline.vae.to(dtype)
                 pipeline.text_encoder.to(dtype)
             else:
                 pipeline = SanaPipeline.from_pretrained(path, torch_dtype=dtype)
         else:
-            pipeline = AutoPipelineForText2Image.from_pretrained(path, torch_dtype=dtype)
+            pipeline = AutoPipelineForText2Image.from_pretrained(
+                path, torch_dtype=dtype
+            )
         pipeline = pipeline.to(device)
         model = pipeline.unet if hasattr(pipeline, "unet") else pipeline.transformer
         replace_fused_linear_with_concat_linear(model)
@@ -387,7 +455,9 @@ class DiffusionPipelineConfig:
         for key in vars.__dict__.keys():
             if key.startswith("text_encoder"):
                 suffix = key[len("text_encoder") :]
-                encoder, tokenizer = getattr(pipeline, f"text_encoder{suffix}"), getattr(pipeline, f"tokenizer{suffix}")
+                encoder, tokenizer = getattr(
+                    pipeline, f"text_encoder{suffix}"
+                ), getattr(pipeline, f"tokenizer{suffix}")
                 if not supported or isinstance(encoder, supported):
                     results.append((key, encoder, tokenizer))
         return results
