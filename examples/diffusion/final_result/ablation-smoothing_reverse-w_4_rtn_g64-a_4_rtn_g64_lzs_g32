@@ -1,1 +1,0 @@
-../runs/diffusion/pixart/pixart-sigma/w.4-x.8-y.16/w.sint4-x.sint8.u-y.fp16/w.v64.fp16-x.v64.fp16-y.tnsr.fp16/smooth.proj-w.static/shift-skip.x.[[w]].w.[aa+e+fa+rs+rtp+s+tan+tn+tpi+tpo]-rev_smth.proj.GridSearch.a0.bn2.[AbsMax].skip.[rc]-lzs-qdiff.128-t20.g4.5-s5000/run-251218.211940/
