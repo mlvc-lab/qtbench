@@ -1,15 +1,13 @@
 quant:
   wgts:
-    dtype: uint8
-    zero_point: PreScale
+    dtype: cint8
     enable_kernel_lzs: true
     kernel_lzs:
       bits: 4
       base: 8
       group_size: 16
   ipts:
-    dtype: uint8 # uint8
-    zero_point: PreScale #PreScale
+    dtype: cint8 # uint8
     enable_kernel_lzs: true
     kernel_lzs:
       bits: 4

@@ -1,7 +1,5 @@
 quant:
   wgts:
-    dtype: uint8
-    zero_point: PreScale
     enable_low_rank: false
     group_shapes:
       - - 1
@@ -19,8 +17,6 @@ quant:
     #   hessian_block_size: 512
   ipts:
     static: false
-    dtype: uint8 # uint8
-    zero_point: PreScale #PreScale
     group_shapes:
       - - 1
         - 64

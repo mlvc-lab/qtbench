@@ -5,10 +5,12 @@ eval:
   num_steps: 4
   guidance_scale: 0
   protocol: euler{num_steps}-g{guidance_scale}
-  batch_size_per_gpu: 16
+  batch_size_per_gpu: 32
+  # benchmarks:
+  #   - "deepcompressor/dataset/MJHQ30KMETA.json"
 quant:
   calib:
-    batch_size: 16
+    batch_size: 32
   wgts:
     skips: 
     - embed
