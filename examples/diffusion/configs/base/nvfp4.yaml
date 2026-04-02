@@ -1,5 +1,4 @@
 quant:
-
   wgts:
     dtype: sfp4_e2m1_all
     group_shapes:

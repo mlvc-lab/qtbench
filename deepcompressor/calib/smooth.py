@@ -151,6 +151,42 @@ def get_smooth_scale(
     return smooth_scale
 
 
+@torch.inference_mode()
+def _compute_tensors_channel_variance(
+    tensors: tp.Sequence[torch.Tensor],
+    num_channels: int,
+    *,
+    channels_dim: int = 1,
+    dtype: torch.dtype = torch.float32,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    """Compute per-channel variance across a list of tensors.
+
+    Each tensor is reshaped so that the channel dimension is last, then all
+    non-channel elements are treated as independent observations.
+
+    Args:
+        tensors: Input tensors, each with ``channels_dim`` of size ``num_channels``.
+        num_channels: Number of channels.
+        channels_dim: Which dimension holds channels (default 1).
+        dtype: Working dtype for variance computation.
+        device: Target device for the result.
+
+    Returns:
+        Tensor of shape ``[num_channels]`` with per-channel variance.
+    """
+    vals = []
+    for t in tensors:
+        t = t.to(dtype=dtype)
+        # Move channels_dim to last, then flatten everything else → [N*..., C]
+        t = t.movedim(channels_dim, -1).reshape(-1, num_channels)
+        vals.append(t)
+    all_vals = torch.cat(vals, dim=0)  # [N_total, C]
+    if device is not None:
+        all_vals = all_vals.to(device=device)
+    return all_vals.var(dim=0)  # [C]
+
+
 class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
     """The quantization smoothing calibrator."""
 
@@ -285,6 +321,175 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
     def beta_span_modes(self) -> list[SmoothSpanMode]:
         """Get the span modes for beta."""
         return self.config.b_spans
+
+    # ------------------------------------------------------------------
+    # LAB (LSB-Aware Balancing) helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    @torch.inference_mode()
+    def compute_lab_loss(
+        x_var: torch.Tensor,
+        w_var: torch.Tensor,
+        scale: torch.Tensor,
+    ) -> float:
+        """Compute the LAB variance-ratio loss for a candidate smooth scale.
+
+        The LAB loss from ARTLAB is defined as::
+
+            L_LAB = Σ_i  Var(X̃_i) / Var(W̃_i)
+
+        where ``X̃_i = X_i / s_i`` and ``W̃_i = W_i * s_i``.  Expanding:
+
+            L_LAB = Σ_i  Var(X_i) / s_i² / (Var(W_i) * s_i²)
+                  = Σ_i  Var(X_i) / (Var(W_i) * s_i⁴)
+
+        Args:
+            x_var: Per-channel variance of activations, shape ``[C_in]``.
+            w_var: Per-channel variance of weights (across output channels),
+                shape ``[C_in]``.
+            scale: Candidate smooth scale, shape ``[C_in]``.
+
+        Returns:
+            Scalar LAB loss value.
+        """
+        eps = torch.finfo(x_var.dtype).eps
+        s2 = scale.to(dtype=x_var.dtype).pow(2).clamp_min(eps)
+        # Var(X̃_i) / Var(W̃_i) = (Var(X_i)/s²) / (Var(W_i)*s²)
+        ratio = x_var / s2 / (w_var * s2).clamp_min(eps)
+        return ratio.sum().item()
+
+    @torch.inference_mode()
+    def _calibrate_var_ratio(
+        self,
+        x_wgts: list[nn.Parameter],
+        x_acts: TensorsCache,
+    ) -> torch.Tensor:
+        """Calibrate smooth scale by minimising LAB variance-ratio loss.
+
+        Iterates over all candidate (alpha, beta) pairs and span combinations
+        without running any forward passes; the optimal scale is chosen
+        analytically from per-channel variance statistics.
+
+        Args:
+            x_wgts: Weight parameters of the linear modules sharing one input.
+            x_acts: Cached input activations for those modules.
+
+        Returns:
+            Best smooth scale tensor of shape ``[C_in]``.
+        """
+        assert self.tensor_type == TensorType.Weights, (
+            "VarianceRatio objective is only supported for weight-centric calibration"
+        )
+        device = x_wgts[0].device
+        self.num_in_channels = x_wgts[0].shape[1]
+        assert all(w.shape[1] == self.num_in_channels for w in x_wgts)
+
+        # Head-repeat bookkeeping (mirrors _reset)
+        if self.num_heads > 1 and self.num_head_repeats > 1:
+            self.num_unique_heads = self.num_heads // self.num_head_repeats
+        else:
+            self.num_unique_heads = 0
+
+        # ---- Compute span pairs (same logic as _reset for wgts_centric) ----
+        x_tensors = x_acts.front().get_standardized_data(reshape=False)
+        assert all(x.shape[1] == self.num_in_channels for x in x_tensors)
+
+        x_spans: dict[SmoothSpanMode, torch.Tensor] = {}
+        for span_mode in self.alpha_span_modes:
+            x_span = get_smooth_span(
+                x_tensors,
+                group_shape=self.x_group_shape,
+                span_mode=span_mode,
+                device=device,
+                dtype=self.develop_dtype,
+            )
+            if self.num_unique_heads > 0:
+                x_span = x_span.view(self.num_unique_heads, self.num_head_repeats, -1)
+                x_span = (x_span.amax if "Max" in span_mode.name else x_span.mean)(
+                    dim=1, keepdim=True
+                )
+                x_span = x_span.expand(
+                    self.num_unique_heads, self.num_head_repeats, -1
+                ).reshape(-1)
+            x_spans[span_mode] = x_span
+
+        w_tensors = [w.data for w in x_wgts]
+        w_spans: dict[SmoothSpanMode, torch.Tensor] = {}
+        for span_mode in self.beta_span_modes:
+            w_span = get_smooth_span(
+                w_tensors,
+                group_shape=self.w_group_shape,
+                span_mode=span_mode,
+                dtype=self.develop_dtype,
+            )
+            if self.num_unique_heads > 0:
+                w_span = w_span.view(self.num_unique_heads, self.num_head_repeats, -1)
+                w_span = (w_span.amax if "Max" in span_mode.name else w_span.mean)(
+                    dim=1, keepdim=True
+                )
+                w_span = w_span.expand(
+                    self.num_unique_heads, self.num_head_repeats, -1
+                ).reshape(-1)
+            w_spans[span_mode] = w_span
+
+        self.span_pairs = [
+            (x_spans[a_mode], w_spans[b_mode])
+            for a_mode, b_mode in self.span_mode_pairs
+        ]
+
+        # ---- Compute per-channel variances ----
+        x_var = _compute_tensors_channel_variance(
+            x_tensors,
+            self.num_in_channels,
+            channels_dim=1,
+            dtype=self.develop_dtype,
+            device=device,
+        )
+        # Weights: shape [C_out, C_in, ...]; variance per input channel
+        w_var = _compute_tensors_channel_variance(
+            w_tensors,
+            self.num_in_channels,
+            channels_dim=1,
+            dtype=self.develop_dtype,
+            device=device,
+        )
+
+        # ---- Grid search over (alpha, beta) pairs and span combinations ----
+        best_loss: float = float("inf")
+        best_scale: torch.Tensor = torch.ones(
+            self.num_in_channels, device=device, dtype=self.develop_dtype
+        )
+
+        for a_span, b_span in self.span_pairs:
+            for alpha, beta in self.alpha_beta_pairs:
+                if alpha == 0 and beta == 0:
+                    scale = torch.ones_like(a_span)
+                else:
+                    scale = get_smooth_scale(
+                        alpha_base=a_span, beta_base=b_span, alpha=alpha, beta=beta
+                    )
+                loss = self.compute_lab_loss(x_var, w_var, scale)
+                if loss < best_loss:
+                    best_loss = loss
+                    best_scale = scale.clone()
+
+        self.logger.debug(
+            "  + LAB best loss = %.6f, scale = [min=%.4f, max=%.4f]",
+            best_loss,
+            best_scale.min().item(),
+            best_scale.max().item(),
+        )
+        return best_scale
+
+    def calibrate(self, x_wgts=None, y_wgts=None, x_acts=None, **kwargs) -> torch.Tensor:
+        """Calibrate smooth scale, dispatching to LAB path for VarianceRatio objective."""
+        if self.config.objective == SearchBasedCalibObjective.VarianceRatio:
+            tools.logging.Formatter.indent_inc()
+            result = self._calibrate_var_ratio(x_wgts, x_acts)
+            tools.logging.Formatter.indent_dec()
+            return result
+        return super().calibrate(x_wgts=x_wgts, y_wgts=y_wgts, x_acts=x_acts, **kwargs)
 
     def _reset(  # noqa: C901
         self,
