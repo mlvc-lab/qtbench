@@ -49,7 +49,6 @@ cd qtbench
 ```
 
 2. Install Package
-
 ```
 conda env create -f environment.yml
 poetry install
@@ -60,3 +59,4 @@ poetry install
 Quantization Bench is forked from DeepCompressor library from MIT Han Lab.
 Many thanks to the original authors for their great work!
 
+This is also used for safe llms project.
