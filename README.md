@@ -58,5 +58,3 @@ poetry install
 
 Quantization Bench is forked from DeepCompressor library from MIT Han Lab.
 Many thanks to the original authors for their great work!
-
-This is also used for safe llms project.
