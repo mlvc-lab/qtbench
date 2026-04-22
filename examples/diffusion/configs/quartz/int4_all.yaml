@@ -1,0 +1,17 @@
+quant:
+  wgts:
+    dtype: uint8
+    zero_point: PreScale
+    enable_kernel_lzs: true
+    kernel_lzs:
+      bits: 4
+      base: 8
+      group_size: 16
+  ipts:
+    dtype: uint8 # uint8
+    zero_point: PreScale #PreScale
+    enable_kernel_lzs: true
+    kernel_lzs:
+      bits: 4
+      base: 8
+      group_size: 16

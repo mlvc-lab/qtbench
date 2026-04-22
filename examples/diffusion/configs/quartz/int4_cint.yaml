@@ -1,0 +1,15 @@
+quant:
+  wgts:
+    dtype: cint8
+    enable_kernel_lzs: true
+    kernel_lzs:
+      bits: 4
+      base: 8
+      group_size: 16
+  ipts:
+    dtype: cint8 # uint8
+    enable_kernel_lzs: true
+    kernel_lzs:
+      bits: 4
+      base: 8
+      group_size: 16

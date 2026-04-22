@@ -1,0 +1,12 @@
+quant:
+  wgts:
+    dtype: sint4
+    enable_low_rank: false
+    group_shapes:
+      - - 1
+        - 64
+        - 1
+        - 1
+        - 1
+    scale_dtypes:
+      - null

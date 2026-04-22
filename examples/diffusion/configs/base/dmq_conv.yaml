@@ -1,0 +1,24 @@
+quant:
+  wgts:
+    dtype: sint4
+    enable_low_rank: false
+    group_shapes:
+      - - 1
+        - -1
+        - -1
+        - -1
+        - -1
+    scale_dtypes:
+      - null
+  ipts:
+    static: false
+    dtype: sint4
+    group_shapes:
+      - - 1
+        - -1
+        - -1
+    scale_dtypes:
+      - uexp8_nan
+    allow_unsigned: true
+pipeline:
+  shift_activations: false

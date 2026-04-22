@@ -44,6 +44,8 @@ class SearchBasedCalibObjective(enum.Enum):
     """minimize the error of the the multiplication products."""
     OutputsError = enum.auto()
     """minimize the error of the outputs of the evaluation module."""
+    VarianceRatio = enum.auto()
+    """minimize the ratio of activation variance to weight variance (LAB loss for ARTLAB)."""
 
 
 @configclass
@@ -95,7 +97,7 @@ class SearchBasedCalibConfig:
             assert self.sample_size != 0, "sample_size must not be zero"
         else:
             assert self.objective == SearchBasedCalibObjective.TensorError
-        if self.objective == SearchBasedCalibObjective.TensorError:
+        if self.objective in (SearchBasedCalibObjective.TensorError, SearchBasedCalibObjective.VarianceRatio):
             pass
         elif self.granularity == SearchBasedCalibGranularity.Layer:
             self.objective = SearchBasedCalibObjective.OutputsError

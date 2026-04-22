@@ -5,6 +5,7 @@ eval:
   num_steps: 4
   guidance_scale: 0
   protocol: fmeuler{num_steps}-g{guidance_scale}
+  batch_size_per_gpu: 4
 quant:
   calib:
     batch_size: 16

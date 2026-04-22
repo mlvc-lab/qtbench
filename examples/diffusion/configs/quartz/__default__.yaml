@@ -1,7 +1,5 @@
 quant:
-  enable_smooth: false
   wgts:
-    dtype: sint4
     enable_low_rank: false
     group_shapes:
       - - 1
@@ -11,9 +9,14 @@ quant:
         - 1
     scale_dtypes:
       - null
+    enable_kernel_gptq: false
+    # kernel_gptq:
+    #   damp_percentage: 0.01
+    #   block_size: 128
+    #   num_inv_tries: 250
+    #   hessian_block_size: 512
   ipts:
     static: false
-    dtype: sint4
     group_shapes:
       - - 1
         - 64
@@ -25,4 +28,3 @@ quant:
     allow_unsigned: true
 pipeline:
   shift_activations: true
-

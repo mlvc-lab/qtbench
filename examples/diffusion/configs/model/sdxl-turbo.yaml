@@ -1,12 +1,16 @@
 pipeline:
   name: sdxl-turbo
+  dtype: torch.float32
 eval:
   num_steps: 4
   guidance_scale: 0
-  protocol: eulera{num_steps}-g{guidance_scale}
+  protocol: euler{num_steps}-g{guidance_scale}
+  batch_size_per_gpu: 32
+  # benchmarks:
+  #   - "deepcompressor/dataset/MJHQ30KMETA.json"
 quant:
   calib:
-    batch_size: 256
+    batch_size: 32
   wgts:
     skips: 
     - embed

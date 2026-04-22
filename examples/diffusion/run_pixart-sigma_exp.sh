@@ -1,0 +1,13 @@
+CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/int4.yaml --save-model true
+# CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/quartz/int4.yaml --save-model true
+CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/quartz/int4.yaml configs/gptq.yaml --save-model true
+# CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/quartz/int4.yaml configs/reverse_smooth.yaml --save-model true
+CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/quartz/int4.yaml configs/gptq.yaml configs/reverse_smooth.yaml --save-model true
+CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/mxfp4.yaml --save-model true
+CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/mxfp4.yaml configs/gptq.yaml --save-model true
+CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/mxfp4.yaml configs/smooth.yaml --save-model true
+CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/mxfp4.yaml configs/reverse_smooth.yaml --save-model true
+CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/nvfp4.yaml --save-model true
+CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/nvfp4.yaml configs/gptq.yaml --save-model true
+CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/nvfp4.yaml configs/smooth.yaml --save-model true
+CUDA_VISIBLE_DEVICES=1 python -m deepcompressor.app.diffusion.ptq configs/model/pixart-sigma.yaml configs/nvfp4.yaml configs/reverse_smooth.yaml --save-model true

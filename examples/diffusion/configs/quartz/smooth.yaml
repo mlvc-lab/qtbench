@@ -1,0 +1,23 @@
+quant:
+  enable_smooth: true
+  smooth:
+    enable_proj: true
+    proj:
+      strategy: Manual
+      granularity: Layer
+      spans:
+      - - AbsMax
+        - AbsMax
+      alpha: 0.5
+      beta: -2
+      allow_low_rank: false
+      fuse_when_possible: false
+      skips:
+      - embed
+      - resblock
+      - transformer_proj_in
+      - transformer_proj_out
+      - transformer_norm
+      - transformer_add_norm
+      - down_sample
+      - up_sample

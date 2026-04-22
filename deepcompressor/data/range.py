@@ -10,7 +10,13 @@ import torch
 from .dtype import QuantDataType
 from .zero import ZeroPointDomain
 
-__all__ = ["RangeBound", "QuantRange", "LogQuantRange", "ProtectiveQuantRange", "DynamicRange"]
+__all__ = [
+    "RangeBound",
+    "QuantRange",
+    "LogQuantRange",
+    "ProtectiveQuantRange",
+    "DynamicRange",
+]
 
 
 @dataclass
@@ -45,7 +51,9 @@ class QuantRange(RangeBound):
             max=None if self.max is None else log2_abs_min,
         )
 
-    def intersect(self, quant_dtype: QuantDataType, *, has_zero_point: bool) -> "QuantRange":
+    def intersect(
+        self, quant_dtype: QuantDataType, *, has_zero_point: bool
+    ) -> "QuantRange":
         """Return the intersection of the current quantization range and the given data type.
 
         Args:
@@ -82,7 +90,10 @@ class QuantRange(RangeBound):
 
     @staticmethod
     def construct(
-        dtype: QuantDataType, *, has_zero_point: bool, quant_range: tp.Optional["QuantRange"] = None
+        dtype: QuantDataType,
+        *,
+        has_zero_point: bool,
+        quant_range: tp.Optional["QuantRange"] = None,
     ) -> "QuantRange":
         """Return the intersection of the given quantization range and the given data type.
 
@@ -98,7 +109,9 @@ class QuantRange(RangeBound):
             `QuantRange`:
                 The intersection of the given quantization range and the given data type.
         """
-        return (quant_range or QuantRange()).intersect(dtype, has_zero_point=has_zero_point)
+        return (quant_range or QuantRange()).intersect(
+            dtype, has_zero_point=has_zero_point
+        )
 
 
 class LogQuantRange(QuantRange):
@@ -108,7 +121,9 @@ class LogQuantRange(QuantRange):
         """Return the log-scale of the quantization range."""
         return self
 
-    def intersect(self, quant_dtype: QuantDataType, *, has_zero_point: bool) -> "QuantRange":
+    def intersect(
+        self, quant_dtype: QuantDataType, *, has_zero_point: bool
+    ) -> "QuantRange":
         """Return the intersection of the current quantization range and the given data type.
 
         Args:
@@ -135,8 +150,16 @@ class LogQuantRange(QuantRange):
                 The intersection of the current quantization range and the given data type in log2 space.
         """
         return LogQuantRange(
-            min=quant_dtype.min_exponent_value if self.min is None else max(self.min, quant_dtype.min_exponent_value),
-            max=quant_dtype.max_exponent_value if self.max is None else min(self.max, quant_dtype.max_exponent_value),
+            min=(
+                quant_dtype.min_exponent_value
+                if self.min is None
+                else max(self.min, quant_dtype.min_exponent_value)
+            ),
+            max=(
+                quant_dtype.max_exponent_value
+                if self.max is None
+                else min(self.max, quant_dtype.max_exponent_value)
+            ),
         )
 
     @staticmethod
@@ -163,7 +186,10 @@ class LogQuantRange(QuantRange):
 
 class ProtectiveQuantRange(QuantRange):
     _instances: tp.ClassVar[
-        dict[tuple[QuantDataType, QuantDataType, tuple[float, float], ZeroPointDomain], "ProtectiveQuantRange"]
+        dict[
+            tuple[QuantDataType, QuantDataType, tuple[float, float], ZeroPointDomain],
+            "ProtectiveQuantRange",
+        ]
     ] = {}
 
     @staticmethod
@@ -195,7 +221,9 @@ class ProtectiveQuantRange(QuantRange):
         if zero_domain is None:
             return QuantRange.construct(outer_dtype, has_zero_point=False)
 
-        inner_quant_range = QuantRange.construct(inner_dtype, has_zero_point=True, quant_range=inner_quant_range)
+        inner_quant_range = QuantRange.construct(
+            inner_dtype, has_zero_point=True, quant_range=inner_quant_range
+        )
         qmax, qmin = int(inner_quant_range.max), int(inner_quant_range.min)  # type: ignore
         key = (outer_dtype, inner_dtype, (qmin, qmax), zero_domain)
         if key not in ProtectiveQuantRange._instances:
@@ -235,8 +263,12 @@ class ProtectiveQuantRange(QuantRange):
                 if valid:
                     found_pmax = pmax
                     break
-            assert found_pmax is not None, "failed to find the protective quantization range"
-            ProtectiveQuantRange._instances[key] = ProtectiveQuantRange(min=-found_pmax, max=found_pmax)
+            assert (
+                found_pmax is not None
+            ), "failed to find the protective quantization range"
+            ProtectiveQuantRange._instances[key] = ProtectiveQuantRange(
+                min=-found_pmax, max=found_pmax
+            )
         return ProtectiveQuantRange._instances[key]
 
 
@@ -283,6 +315,7 @@ class DynamicRange:
         *,
         zero_domain: ZeroPointDomain | None,
         is_float_point: bool,
+        is_signed_min_max: bool = False,
     ) -> "DynamicRange":
         """Return a dynamic range of the given tensor.
 
@@ -293,6 +326,8 @@ class DynamicRange:
                 The zero-point domain.
             is_float_point (`bool`):
                 Whether the data type is floating-point.
+            is_signed_min_max (`bool`, *optional*, defaults to `False`):
+                Whether to use signed min-max range for integer data type.
 
         Returns:
             `DynamicRange`:
@@ -302,37 +337,56 @@ class DynamicRange:
             tensors = [tensors]
         if self.ratio is None and self.max is not None:  # static range
             tensor = tensors[0]
-            shape = torch.Size([s if i % 2 == 0 else 1 for i, s in enumerate(tensor.shape)])
-            vmax = self._format_m_(self.max, shape=shape, dtype=tensor.dtype, device=tensor.device)
-            vmin = self._format_m_(self.min, shape=shape, dtype=tensor.dtype, device=tensor.device)
+            shape = torch.Size(
+                [s if i % 2 == 0 else 1 for i, s in enumerate(tensor.shape)]
+            )
+            vmax = self._format_m_(
+                self.max, shape=shape, dtype=tensor.dtype, device=tensor.device
+            )
+            vmin = self._format_m_(
+                self.min, shape=shape, dtype=tensor.dtype, device=tensor.device
+            )
         else:
             if self.max is None:
                 assert self.min is None, "min must be None if max is None"
             reduced = list(range(1, tensors[0].ndim, 2))
             # region step 1: determine the value range (i.e., vmax and vmin)
-            if zero_domain is None:
+            if zero_domain is None and not is_signed_min_max:
                 vmin = None
                 vmax = tensors[0].abs().amax(dim=reduced, keepdim=True)
                 for tensor in tensors[1:]:
-                    vmax = torch.maximum(vmax, tensor.abs().amax(dim=reduced, keepdim=True).to(vmax.device))
+                    vmax = torch.maximum(
+                        vmax,
+                        tensor.abs().amax(dim=reduced, keepdim=True).to(vmax.device),
+                    )
             else:
                 vmax = tensors[0].amax(dim=reduced, keepdim=True)
                 for tensor in tensors[1:]:
-                    vmax = torch.maximum(vmax, tensor.amax(dim=reduced, keepdim=True).to(vmax.device))
+                    vmax = torch.maximum(
+                        vmax, tensor.amax(dim=reduced, keepdim=True).to(vmax.device)
+                    )
                 vmin = tensors[0].amin(dim=reduced, keepdim=True)
                 for tensor in tensors[1:]:
-                    vmin = torch.minimum(vmin, tensor.amin(dim=reduced, keepdim=True).to(vmin.device))
-                if is_float_point:  # ! we adapt the zero-point to be the mean of the data
+                    vmin = torch.minimum(
+                        vmin, tensor.amin(dim=reduced, keepdim=True).to(vmin.device)
+                    )
+                if (
+                    is_float_point
+                ):  # ! we adapt the zero-point to be the mean of the data
                     vavg = tensors[0].mean(dim=reduced, keepdim=True)
                     if len(tensors) > 1:
                         for tensor in tensors[1:]:
-                            vavg = vavg + tensor.mean(dim=reduced, keepdim=True).to(vavg.device)
+                            vavg = vavg + tensor.mean(dim=reduced, keepdim=True).to(
+                                vavg.device
+                            )
                         vavg = vavg / len(tensors)
             # endregion
             # region step 2: scale the value range by self.ratio
             if zero_domain is None:
                 if self.ratio is not None:
                     vmax = vmax * self.ratio
+                    if vmin is not None and is_signed_min_max:
+                        vmin = vmin * self.ratio
             else:
                 assert vmin is not None, "vmin must be specified"
                 if is_float_point:
@@ -358,7 +412,11 @@ class DynamicRange:
         return DynamicRange(min=vmin, max=vmax)
 
     def scale(
-        self, ratio: float | torch.Tensor, zero_domain: ZeroPointDomain | None, is_float_point: bool
+        self,
+        ratio: float | torch.Tensor,
+        zero_domain: ZeroPointDomain | None,
+        is_float_point: bool,
+        is_signed_min_max: bool = False,
     ) -> "DynamicRange":
         """Return new dynamic range by scaling the current range.
 
@@ -369,6 +427,8 @@ class DynamicRange:
                 The zero-point domain.
             is_float_point (`bool`):
                 Whether the data type is floating-point.
+            is_signed_min_max (`bool`, *optional*, defaults to `False`):
+                Whether to use signed min-max range for integer data type.
 
         Returns:
             `DynamicRange`:
@@ -377,9 +437,11 @@ class DynamicRange:
         assert ratio is not None, "ratio must be specified"
         if zero_domain is None:
             assert self.max is not None, "self.max must be specified"
-            assert self.min is None, "self.min must be None for data type without zero-point"
+            assert (
+                self.min is None and not is_signed_min_max
+            ), "self.min must be None for data type without zero-point"
             max_value = self.max * ratio
-            min_value = None
+            min_value = self.min * ratio if is_signed_min_max else None
         else:
             assert self.min is not None, "self.min must be specified"
             assert self.max is not None, "self.max must be specified"
@@ -403,8 +465,14 @@ class DynamicRange:
         *,
         zero_domain: ZeroPointDomain | None,
         is_float_point: bool,
+        is_signed_min_max: bool = False,
     ) -> "DynamicRange":
-        return DynamicRange().measure(tensors, zero_domain=zero_domain, is_float_point=is_float_point)
+        return DynamicRange().measure(
+            tensors,
+            zero_domain=zero_domain,
+            is_float_point=is_float_point,
+            is_signed_min_max=is_signed_min_max,
+        )
 
     @staticmethod
     def _format_m_(
@@ -435,4 +503,8 @@ class DynamicRange:
     @classmethod
     def from_dict(cls, data: dict[str, tp.Any] | None) -> tp.Optional[tp.Self]:
         """Return the dynamic range from the given dictionary."""
-        return cls(min=data["min"], max=data["max"], ratio=data["ratio"]) if data is not None else None
+        return (
+            cls(min=data["min"], max=data["max"], ratio=data["ratio"])
+            if data is not None
+            else None
+        )

@@ -1,9 +1,11 @@
 pipeline:
   name: pixart-sigma
+  dtype: torch.float16
 eval:
   num_steps: 20
   guidance_scale: 4.5
   protocol: dpm{num_steps}-g{guidance_scale}
+  batch_size_per_gpu: 16
 quant:
   calib:
     batch_size: 256

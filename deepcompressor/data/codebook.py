@@ -34,6 +34,9 @@ class Codebook:
         assert self.size <= self.values.numel(), "Codebook size is larger than the values size"
         assert self.values.shape == self.codes.shape, "Values and Codes must have the same shape"
 
+    # Maximum number of elements per CUDA kernel call to avoid int32 overflow in the kernel.
+    _MAX_NUMEL_PER_CHUNK: int = 2**30
+
     def round(self, tensor: torch.Tensor) -> torch.Tensor:
         """Round the tensor to the nearest value in the codebook.
 
@@ -47,7 +50,14 @@ class Codebook:
         """
         dtype = tensor.dtype
         tensor = tensor.to(self.values.dtype).contiguous()
-        return _C.round_to_nearest_in_codebook_cuda(tensor, self.values).to(dtype=dtype)
+        if tensor.numel() <= self._MAX_NUMEL_PER_CHUNK:
+            return _C.round_to_nearest_in_codebook_cuda(tensor, self.values).to(dtype=dtype)
+        flat = tensor.view(-1)
+        out = torch.empty_like(flat)
+        for start in range(0, flat.numel(), self._MAX_NUMEL_PER_CHUNK):
+            end = min(start + self._MAX_NUMEL_PER_CHUNK, flat.numel())
+            out[start:end] = _C.round_to_nearest_in_codebook_cuda(flat[start:end], self.values)
+        return out.view(tensor.shape).to(dtype=dtype)
 
     def to(self, *, device: torch.device | None = None, dtype: torch.dtype | None = None) -> "Codebook":
         """Move the codebook to the specified device and dtype.

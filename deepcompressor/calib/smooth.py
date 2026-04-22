@@ -67,7 +67,9 @@ class ActivationSmoother(BaseTensorProcessor):
         device, dtype = tensor.device, tensor.dtype
         if self.develop_dtype is None:
             self.develop_dtype = dtype
-        self.smooth_scale = self.smooth_scale.to(device=device, dtype=self.develop_dtype)
+        self.smooth_scale = self.smooth_scale.to(
+            device=device, dtype=self.develop_dtype
+        )
         tensor = tensor.to(dtype=self.develop_dtype)
         smooth_scale_view_shape = [1] * tensor.ndim
         smooth_scale_view_shape[self.channels_dim] = -1
@@ -107,14 +109,20 @@ def get_smooth_span(
             The span of the tensors for calculating smoothing scale.
     """
     # convert span mode name from camel case to snake case
-    range_name = "".join(["_" + c.lower() if c.isupper() else c for c in span_mode.name]).lstrip("_")
+    range_name = "".join(
+        ["_" + c.lower() if c.isupper() else c for c in span_mode.name]
+    ).lstrip("_")
     range_fn = getattr(ChannelMetric, range_name)
-    r: torch.Tensor = range_fn(tensors, tensors[0].shape[1], group_shape, device=device, dtype=dtype)
+    r: torch.Tensor = range_fn(
+        tensors, tensors[0].shape[1], group_shape, device=device, dtype=dtype
+    )
     return r
 
 
 @torch.inference_mode()
-def get_smooth_scale(*, alpha_base: torch.Tensor, beta_base: torch.Tensor, alpha: float, beta: float) -> torch.Tensor:
+def get_smooth_scale(
+    *, alpha_base: torch.Tensor, beta_base: torch.Tensor, alpha: float, beta: float
+) -> torch.Tensor:
     """Calculate the smoothing scale for quantization. Scale = alpha_base^alpha / beta_base^beta.
 
     Args:
@@ -131,19 +139,52 @@ def get_smooth_scale(*, alpha_base: torch.Tensor, beta_base: torch.Tensor, alpha
         `torch.Tensor`:
             Smoothing scale.
     """
-    assert 0 <= alpha <= 1 and 0 <= beta <= 1, "The smooth factors should be in [0, 1]."
-    if alpha > 0:
-        smooth_scale = alpha_base.pow(alpha)
-        if beta > 0:
-            smooth_scale = smooth_scale.div_(beta_base.pow(beta))
-    else:
-        smooth_scale = beta_base.pow(-beta)
-    smooth_scale[smooth_scale == 0] = 1
-    if smooth_scale.isnan().any() or smooth_scale.isinf().any():
-        smooth_scale = smooth_scale.fill_(1)
-    assert not smooth_scale.isnan().any(), "The smooth scale contains NaN."
-    assert not smooth_scale.isinf().any(), "The smooth scale contains Inf."
+    assert (
+        -1 <= alpha <= 1 and -1 <= beta <= 1
+    ), "The smooth factors should be in [-1, 1]."
+
+    eps = torch.finfo(alpha_base.dtype).eps
+    smooth_scale = (
+        alpha_base.clamp_min(eps).pow(alpha).div(beta_base.clamp_min(eps).pow(beta))
+    )
+    smooth_scale = smooth_scale.nan_to_num(1.0, posinf=1.0, neginf=1.0)
     return smooth_scale
+
+
+@torch.inference_mode()
+def _compute_tensors_channel_variance(
+    tensors: tp.Sequence[torch.Tensor],
+    num_channels: int,
+    *,
+    channels_dim: int = 1,
+    dtype: torch.dtype = torch.float32,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    """Compute per-channel variance across a list of tensors.
+
+    Each tensor is reshaped so that the channel dimension is last, then all
+    non-channel elements are treated as independent observations.
+
+    Args:
+        tensors: Input tensors, each with ``channels_dim`` of size ``num_channels``.
+        num_channels: Number of channels.
+        channels_dim: Which dimension holds channels (default 1).
+        dtype: Working dtype for variance computation.
+        device: Target device for the result.
+
+    Returns:
+        Tensor of shape ``[num_channels]`` with per-channel variance.
+    """
+    vals = []
+    for t in tensors:
+        t = t.to(dtype=dtype)
+        # Move channels_dim to last, then flatten everything else → [N*..., C]
+        t = t.movedim(channels_dim, -1).reshape(-1, num_channels)
+        vals.append(t)
+    all_vals = torch.cat(vals, dim=0)  # [N_total, C]
+    if device is not None:
+        all_vals = all_vals.to(device=device)
+    return all_vals.var(dim=0)  # [C]
 
 
 class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
@@ -208,13 +249,25 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
             y_group_shape = list(self.y_quantizer.config.largest_group_shape)
         else:
             y_group_shape = [1, None, -1]
-        w_group_shape[1] = x_group_shape[1] if w_group_shape[1] is None else w_group_shape[1]
+        w_group_shape[1] = (
+            x_group_shape[1] if w_group_shape[1] is None else w_group_shape[1]
+        )
         if self.tensor_type == TensorType.Weights:
-            x_group_shape[1] = w_group_shape[1] if x_group_shape[1] is None else x_group_shape[1]
+            x_group_shape[1] = (
+                w_group_shape[1] if x_group_shape[1] is None else x_group_shape[1]
+            )
         else:
-            x_group_shape[1] = y_group_shape[1] if x_group_shape[1] is None else x_group_shape[1]
-        y_group_shape[1] = x_group_shape[1] if y_group_shape[1] is None else y_group_shape[1]
-        self.w_group_shape, self.x_group_shape, self.y_group_shape = w_group_shape, x_group_shape, y_group_shape
+            x_group_shape[1] = (
+                y_group_shape[1] if x_group_shape[1] is None else x_group_shape[1]
+            )
+        y_group_shape[1] = (
+            x_group_shape[1] if y_group_shape[1] is None else y_group_shape[1]
+        )
+        self.w_group_shape, self.x_group_shape, self.y_group_shape = (
+            w_group_shape,
+            x_group_shape,
+            y_group_shape,
+        )
         # endregion
         self.alpha_beta_pairs = self.config.get_alpha_beta_pairs()
         self.num_iters = 1
@@ -269,6 +322,175 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
         """Get the span modes for beta."""
         return self.config.b_spans
 
+    # ------------------------------------------------------------------
+    # LAB (LSB-Aware Balancing) helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    @torch.inference_mode()
+    def compute_lab_loss(
+        x_var: torch.Tensor,
+        w_var: torch.Tensor,
+        scale: torch.Tensor,
+    ) -> float:
+        """Compute the LAB variance-ratio loss for a candidate smooth scale.
+
+        The LAB loss from ARTLAB is defined as::
+
+            L_LAB = Σ_i  Var(X̃_i) / Var(W̃_i)
+
+        where ``X̃_i = X_i / s_i`` and ``W̃_i = W_i * s_i``.  Expanding:
+
+            L_LAB = Σ_i  Var(X_i) / s_i² / (Var(W_i) * s_i²)
+                  = Σ_i  Var(X_i) / (Var(W_i) * s_i⁴)
+
+        Args:
+            x_var: Per-channel variance of activations, shape ``[C_in]``.
+            w_var: Per-channel variance of weights (across output channels),
+                shape ``[C_in]``.
+            scale: Candidate smooth scale, shape ``[C_in]``.
+
+        Returns:
+            Scalar LAB loss value.
+        """
+        eps = torch.finfo(x_var.dtype).eps
+        s2 = scale.to(dtype=x_var.dtype).pow(2).clamp_min(eps)
+        # Var(X̃_i) / Var(W̃_i) = (Var(X_i)/s²) / (Var(W_i)*s²)
+        ratio = x_var / s2 / (w_var * s2).clamp_min(eps)
+        return ratio.sum().item()
+
+    @torch.inference_mode()
+    def _calibrate_var_ratio(
+        self,
+        x_wgts: list[nn.Parameter],
+        x_acts: TensorsCache,
+    ) -> torch.Tensor:
+        """Calibrate smooth scale by minimising LAB variance-ratio loss.
+
+        Iterates over all candidate (alpha, beta) pairs and span combinations
+        without running any forward passes; the optimal scale is chosen
+        analytically from per-channel variance statistics.
+
+        Args:
+            x_wgts: Weight parameters of the linear modules sharing one input.
+            x_acts: Cached input activations for those modules.
+
+        Returns:
+            Best smooth scale tensor of shape ``[C_in]``.
+        """
+        assert self.tensor_type == TensorType.Weights, (
+            "VarianceRatio objective is only supported for weight-centric calibration"
+        )
+        device = x_wgts[0].device
+        self.num_in_channels = x_wgts[0].shape[1]
+        assert all(w.shape[1] == self.num_in_channels for w in x_wgts)
+
+        # Head-repeat bookkeeping (mirrors _reset)
+        if self.num_heads > 1 and self.num_head_repeats > 1:
+            self.num_unique_heads = self.num_heads // self.num_head_repeats
+        else:
+            self.num_unique_heads = 0
+
+        # ---- Compute span pairs (same logic as _reset for wgts_centric) ----
+        x_tensors = x_acts.front().get_standardized_data(reshape=False)
+        assert all(x.shape[1] == self.num_in_channels for x in x_tensors)
+
+        x_spans: dict[SmoothSpanMode, torch.Tensor] = {}
+        for span_mode in self.alpha_span_modes:
+            x_span = get_smooth_span(
+                x_tensors,
+                group_shape=self.x_group_shape,
+                span_mode=span_mode,
+                device=device,
+                dtype=self.develop_dtype,
+            )
+            if self.num_unique_heads > 0:
+                x_span = x_span.view(self.num_unique_heads, self.num_head_repeats, -1)
+                x_span = (x_span.amax if "Max" in span_mode.name else x_span.mean)(
+                    dim=1, keepdim=True
+                )
+                x_span = x_span.expand(
+                    self.num_unique_heads, self.num_head_repeats, -1
+                ).reshape(-1)
+            x_spans[span_mode] = x_span
+
+        w_tensors = [w.data for w in x_wgts]
+        w_spans: dict[SmoothSpanMode, torch.Tensor] = {}
+        for span_mode in self.beta_span_modes:
+            w_span = get_smooth_span(
+                w_tensors,
+                group_shape=self.w_group_shape,
+                span_mode=span_mode,
+                dtype=self.develop_dtype,
+            )
+            if self.num_unique_heads > 0:
+                w_span = w_span.view(self.num_unique_heads, self.num_head_repeats, -1)
+                w_span = (w_span.amax if "Max" in span_mode.name else w_span.mean)(
+                    dim=1, keepdim=True
+                )
+                w_span = w_span.expand(
+                    self.num_unique_heads, self.num_head_repeats, -1
+                ).reshape(-1)
+            w_spans[span_mode] = w_span
+
+        self.span_pairs = [
+            (x_spans[a_mode], w_spans[b_mode])
+            for a_mode, b_mode in self.span_mode_pairs
+        ]
+
+        # ---- Compute per-channel variances ----
+        x_var = _compute_tensors_channel_variance(
+            x_tensors,
+            self.num_in_channels,
+            channels_dim=1,
+            dtype=self.develop_dtype,
+            device=device,
+        )
+        # Weights: shape [C_out, C_in, ...]; variance per input channel
+        w_var = _compute_tensors_channel_variance(
+            w_tensors,
+            self.num_in_channels,
+            channels_dim=1,
+            dtype=self.develop_dtype,
+            device=device,
+        )
+
+        # ---- Grid search over (alpha, beta) pairs and span combinations ----
+        best_loss: float = float("inf")
+        best_scale: torch.Tensor = torch.ones(
+            self.num_in_channels, device=device, dtype=self.develop_dtype
+        )
+
+        for a_span, b_span in self.span_pairs:
+            for alpha, beta in self.alpha_beta_pairs:
+                if alpha == 0 and beta == 0:
+                    scale = torch.ones_like(a_span)
+                else:
+                    scale = get_smooth_scale(
+                        alpha_base=a_span, beta_base=b_span, alpha=alpha, beta=beta
+                    )
+                loss = self.compute_lab_loss(x_var, w_var, scale)
+                if loss < best_loss:
+                    best_loss = loss
+                    best_scale = scale.clone()
+
+        self.logger.debug(
+            "  + LAB best loss = %.6f, scale = [min=%.4f, max=%.4f]",
+            best_loss,
+            best_scale.min().item(),
+            best_scale.max().item(),
+        )
+        return best_scale
+
+    def calibrate(self, x_wgts=None, y_wgts=None, x_acts=None, **kwargs) -> torch.Tensor:
+        """Calibrate smooth scale, dispatching to LAB path for VarianceRatio objective."""
+        if self.config.objective == SearchBasedCalibObjective.VarianceRatio:
+            tools.logging.Formatter.indent_inc()
+            result = self._calibrate_var_ratio(x_wgts, x_acts)
+            tools.logging.Formatter.indent_dec()
+            return result
+        return super().calibrate(x_wgts=x_wgts, y_wgts=y_wgts, x_acts=x_acts, **kwargs)
+
     def _reset(  # noqa: C901
         self,
         *,
@@ -291,7 +513,9 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
                 The y activations. It should be y for y-x computation.
         """
         wgts_centric = self.tensor_type == TensorType.Weights
-        self.num_in_channels = x_wgts[0].shape[1] if wgts_centric else x_wgts[0].shape[0]
+        self.num_in_channels = (
+            x_wgts[0].shape[1] if wgts_centric else x_wgts[0].shape[0]
+        )
         device = x_wgts[0].device
         if self.num_heads > 1 and self.num_head_repeats > 1:
             self.num_unique_heads = self.num_heads // self.num_head_repeats
@@ -304,7 +528,9 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
         x_tensors = x_acts.front().get_standardized_data(reshape=False)
         assert all(x.shape[1] == self.num_in_channels for x in x_tensors)
         x_spans = {}
-        for span_mode in self.alpha_span_modes if wgts_centric else self.beta_span_modes:
+        for span_mode in (
+            self.alpha_span_modes if wgts_centric else self.beta_span_modes
+        ):
             x_span = get_smooth_span(
                 x_tensors,
                 group_shape=self.x_group_shape,
@@ -314,16 +540,26 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
             )
             if self.num_unique_heads > 0:
                 x_span = x_span.view(self.num_unique_heads, self.num_head_repeats, -1)
-                x_span = (x_span.amax if "Max" in span_mode.name else x_span.mean)(dim=1, keepdim=True)
-                x_span = x_span.expand(self.num_unique_heads, self.num_head_repeats, -1).reshape(-1)
+                x_span = (x_span.amax if "Max" in span_mode.name else x_span.mean)(
+                    dim=1, keepdim=True
+                )
+                x_span = x_span.expand(
+                    self.num_unique_heads, self.num_head_repeats, -1
+                ).reshape(-1)
             if self.tensor_type == TensorType.Outputs and self.with_rope:
                 x_span = x_span.view(self.num_heads, 2, -1)
-                x_span = (x_span.amax if "Max" in span_mode.name else x_span.mean)(dim=1, keepdim=True)
+                x_span = (x_span.amax if "Max" in span_mode.name else x_span.mean)(
+                    dim=1, keepdim=True
+                )
                 x_span = x_span.expand(self.num_heads, 2, -1).reshape(-1)
             x_spans[span_mode] = x_span
             if self.logger.level <= tools.logging.DEBUG:
                 self.logger.debug("+ x - %s", span_mode.name)
-                self.logger.debug("+ x  = [min=%.4f, max=%.4f]", x_span.min().item(), x_span.max().item())
+                self.logger.debug(
+                    "+ x  = [min=%.4f, max=%.4f]",
+                    x_span.min().item(),
+                    x_span.max().item(),
+                )
         del x_tensors
         # endregion
         if wgts_centric:
@@ -338,18 +574,31 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
                     dtype=self.develop_dtype,
                 )
                 if self.num_unique_heads > 0:
-                    w_span = w_span.view(self.num_unique_heads, self.num_head_repeats, -1)
-                    w_span = (w_span.amax if "Max" in span_mode.name else w_span.mean)(dim=1, keepdim=True)
-                    w_span = w_span.expand(self.num_unique_heads, self.num_head_repeats, -1).reshape(-1)
+                    w_span = w_span.view(
+                        self.num_unique_heads, self.num_head_repeats, -1
+                    )
+                    w_span = (w_span.amax if "Max" in span_mode.name else w_span.mean)(
+                        dim=1, keepdim=True
+                    )
+                    w_span = w_span.expand(
+                        self.num_unique_heads, self.num_head_repeats, -1
+                    ).reshape(-1)
                 w_spans[span_mode] = w_span
                 if self.logger.level <= tools.logging.DEBUG:
                     self.logger.debug("+ w - %s", span_mode.name)
-                    self.logger.debug("+ w  = [min=%.4f, max=%.4f]", w_span.min().item(), w_span.max().item())
+                    self.logger.debug(
+                        "+ w  = [min=%.4f, max=%.4f]",
+                        w_span.min().item(),
+                        w_span.max().item(),
+                    )
             self.span_pairs: list[tuple[torch.Tensor, torch.Tensor]] = [
-                (x_spans[x_span_mode], w_spans[w_span_mode]) for x_span_mode, w_span_mode in self.span_mode_pairs
+                (x_spans[x_span_mode], w_spans[w_span_mode])
+                for x_span_mode, w_span_mode in self.span_mode_pairs
             ]
         else:
-            assert y_acts.num_tensors == 1, f"Only one output source is allowed, got {y_acts.num_tensors}"
+            assert (
+                y_acts.num_tensors == 1
+            ), f"Only one output source is allowed, got {y_acts.num_tensors}"
             if self.num_unique_heads > 0:
                 num_out_channels = self.num_in_channels // self.num_head_repeats
             else:
@@ -369,17 +618,26 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
                 )
                 if self.num_unique_heads > 0:
                     y_span = y_span.view(self.num_unique_heads, 1, -1)
-                    y_span = y_span.expand(self.num_unique_heads, self.num_head_repeats, -1).reshape(-1)
+                    y_span = y_span.expand(
+                        self.num_unique_heads, self.num_head_repeats, -1
+                    ).reshape(-1)
                 if self.tensor_type == TensorType.Outputs and self.with_rope:
                     y_span = y_span.view(self.num_heads, 2, -1)
-                    y_span = (y_span.amax if "Max" in span_mode.name else y_span.mean)(dim=1, keepdim=True)
+                    y_span = (y_span.amax if "Max" in span_mode.name else y_span.mean)(
+                        dim=1, keepdim=True
+                    )
                     y_span = y_span.expand(self.num_heads, 2, -1).reshape(-1)
                 y_spans[span_mode] = y_span
                 if self.logger.level <= tools.logging.DEBUG:
                     self.logger.debug("+ y - %s", span_mode.name)
-                    self.logger.debug("+ y  = [min=%.4f, max=%.4f]", y_span.min().item(), y_span.max().item())
+                    self.logger.debug(
+                        "+ y  = [min=%.4f, max=%.4f]",
+                        y_span.min().item(),
+                        y_span.max().item(),
+                    )
             self.span_pairs: list[tuple[torch.Tensor, torch.Tensor]] = [
-                (y_spans[y_span_mode], x_spans[x_span_mode]) for y_span_mode, x_span_mode in self.span_mode_pairs
+                (y_spans[y_span_mode], x_spans[x_span_mode])
+                for y_span_mode, x_span_mode in self.span_mode_pairs
             ]
         self.best_error: list[torch.Tensor] = None
         self.best_scale: torch.Tensor = None
@@ -422,7 +680,9 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
         if alpha == 0 and beta == 0:
             scale = torch.ones_like(a_span, dtype=self.develop_dtype)
         else:
-            scale = get_smooth_scale(alpha_base=a_span, beta_base=b_span, alpha=alpha, beta=beta)
+            scale = get_smooth_scale(
+                alpha_base=a_span, beta_base=b_span, alpha=alpha, beta=beta
+            )
         return scale
 
     def _tell(self, error: list[torch.Tensor]) -> None:  # noqa: C901
@@ -448,21 +708,38 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
         if self.logger.level <= tools.logging.DEBUG:
             self.error_history.append(
                 (
-                    sum(math.root_(e.to(torch.float64).sum(), self.config.degree).item() for e in error),
-                    sum(math.root_(b.to(torch.float64).sum(), self.config.degree).item() for b in self.best_error),
+                    sum(
+                        math.root_(e.to(torch.float64).sum(), self.config.degree).item()
+                        for e in error
+                    ),
+                    sum(
+                        math.root_(b.to(torch.float64).sum(), self.config.degree).item()
+                        for b in self.best_error
+                    ),
                 )
             )
             if self.is_last_candidate_in_iter():
-                logs: list[list[list[tuple]]] = [[] for _ in range(len(self.span_mode_pairs))]
+                logs: list[list[list[tuple]]] = [
+                    [] for _ in range(len(self.span_mode_pairs))
+                ]
                 for i in range(self.population_size):
                     c, r = self._split_candidate_id(i)
                     alpha, beta = self.alpha_beta_pairs[c]
                     if c % 5 == 0:
                         logs[r].append([])
-                    logs[r][-1].append((alpha, beta, self.error_history[i][0], self.error_history[i][1]))
+                    logs[r][-1].append(
+                        (
+                            alpha,
+                            beta,
+                            self.error_history[i][0],
+                            self.error_history[i][1],
+                        )
+                    )
                 for r in range(len(self.span_mode_pairs)):
                     self.logger.debug(
-                        "  - x / w range = %s / %s", self.span_mode_pairs[r][0].name, self.span_mode_pairs[r][1].name
+                        "  - x / w range = %s / %s",
+                        self.span_mode_pairs[r][0].name,
+                        self.span_mode_pairs[r][1].name,
                     )
                     for log in logs[r]:
                         self.logger.debug(
@@ -474,7 +751,8 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
                             ", ".join(f"{beta:10.4f}" for alpha, beta, e, b in log),
                         )
                         self.logger.debug(
-                            "  - sum  error  = [%s]", ", ".join(f"{e:10.4f}" for alpha, beta, e, b in log)
+                            "  - sum  error  = [%s]",
+                            ", ".join(f"{e:10.4f}" for alpha, beta, e, b in log),
                         )
                         self.logger.debug(
                             "  - best error  = [%s]",
@@ -487,21 +765,38 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
                     tools.logging.Formatter.indent_dec()
                     self.logger.debug(
                         "  + error = %.4f",
-                        sum(math.root_(b.to(torch.float64).sum(), self.config.degree).item() for b in self.best_error),
+                        sum(
+                            math.root_(
+                                b.to(torch.float64).sum(), self.config.degree
+                            ).item()
+                            for b in self.best_error
+                        ),
                     )
-                    self.logger.debug("  + scale = [min=%.4f, max=%.4f]", scale.min().item(), scale.max().item())
+                    self.logger.debug(
+                        "  + scale = [min=%.4f, max=%.4f]",
+                        scale.min().item(),
+                        scale.max().item(),
+                    )
                     tools.logging.Formatter.indent_inc()
 
     def _reshape_scale(
-        self, scale: torch.Tensor, tensor: torch.Tensor, channels_dim: int, needs_reduction: bool = False
+        self,
+        scale: torch.Tensor,
+        tensor: torch.Tensor,
+        channels_dim: int,
+        needs_reduction: bool = False,
     ) -> torch.Tensor:
         if self.num_unique_heads > 0 and needs_reduction:
-            scale = scale.view(self.num_unique_heads, self.num_head_repeats, -1)[:, 0, :].reshape(-1)
+            scale = scale.view(self.num_unique_heads, self.num_head_repeats, -1)[
+                :, 0, :
+            ].reshape(-1)
         shape = [1] * tensor.ndim
         shape[channels_dim] = -1
         return scale.view(shape)
 
-    def _process_x_in_xw(self, x: torch.Tensor, channels_dim: int | _MISSING_TYPE = MISSING) -> torch.Tensor:
+    def _process_x_in_xw(
+        self, x: torch.Tensor, channels_dim: int | _MISSING_TYPE = MISSING
+    ) -> torch.Tensor:
         if not self.needs_x_quant_for_wgts:
             return x
         if channels_dim is MISSING:
@@ -511,7 +806,10 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
         x = x.to(dtype=self.develop_dtype) if dtype != self.develop_dtype else x.clone()
         x = x.div_(scale)
         x = self.x_quantizer.quantize(
-            x, channels_dim=channels_dim, default_dtype=dtype, develop_dtype=self.develop_dtype
+            x,
+            channels_dim=channels_dim,
+            default_dtype=dtype,
+            develop_dtype=self.develop_dtype,
         ).data
         x = x.mul_(scale).to(dtype=dtype)
         return x.view(shape)
@@ -520,24 +818,39 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
         if not self.needs_w_quant_for_wgts:
             return w
         dtype = w.dtype
-        channels_dim = 1 if self.w_quantizer.channels_dim is None else self.w_quantizer.channels_dim
+        channels_dim = (
+            1
+            if self.w_quantizer.channels_dim is None
+            else self.w_quantizer.channels_dim
+        )
         scale = self._reshape_scale(self.candidate, w, channels_dim=channels_dim)
         w = w.to(dtype=self.develop_dtype) if dtype != self.develop_dtype else w.clone()
         w = self.w_quantizer.quantize(
-            w.mul_(scale), kernel=None, default_dtype=dtype, develop_dtype=self.develop_dtype
+            w.mul_(scale),
+            kernel=None,
+            default_dtype=dtype,
+            develop_dtype=self.develop_dtype,
         ).data
         w = w.div_(scale).to(dtype=dtype)
         return w
 
-    def _process_x_in_yx(self, x: torch.Tensor, channels_dim: int | _MISSING_TYPE = MISSING) -> torch.Tensor:
+    def _process_x_in_yx(
+        self, x: torch.Tensor, channels_dim: int | _MISSING_TYPE = MISSING
+    ) -> torch.Tensor:
         if not self.needs_x_quant_for_opts:
             return x
         shape, dtype = x.shape, x.dtype
         if self.objective != SearchBasedCalibObjective.OutputsError:
             if channels_dim is MISSING:
                 channels_dim = self.x_quantizer.channels_dim
-            scale = self._reshape_scale(self.candidate, x, channels_dim, needs_reduction=False)
-            x = x.to(dtype=self.develop_dtype) if dtype != self.develop_dtype else x.clone()
+            scale = self._reshape_scale(
+                self.candidate, x, channels_dim, needs_reduction=False
+            )
+            x = (
+                x.to(dtype=self.develop_dtype)
+                if dtype != self.develop_dtype
+                else x.clone()
+            )
             x = x.mul_(scale)
         # ! `x` is already scaled during `_process_opts_centric_mod` by scaling `xw`
         x = self.x_quantizer.quantize(
@@ -550,15 +863,23 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
             x = x.div_(scale).to(dtype=dtype)
         return x.view(shape)
 
-    def _process_y_in_yx(self, y: torch.Tensor, channels_dim: int | _MISSING_TYPE = MISSING) -> torch.Tensor:
+    def _process_y_in_yx(
+        self, y: torch.Tensor, channels_dim: int | _MISSING_TYPE = MISSING
+    ) -> torch.Tensor:
         if not self.needs_y_quant_for_opts:
             return y
         shape, dtype = y.shape, y.dtype
         if self.objective != SearchBasedCalibObjective.OutputsError:
             if channels_dim is MISSING:
                 channels_dim = self.x_quantizer.channels_dim
-            scale = self._reshape_scale(self.candidate, y, channels_dim, needs_reduction=True)
-            y = y.to(dtype=self.develop_dtype) if dtype != self.develop_dtype else y.clone()
+            scale = self._reshape_scale(
+                self.candidate, y, channels_dim, needs_reduction=True
+            )
+            y = (
+                y.to(dtype=self.develop_dtype)
+                if dtype != self.develop_dtype
+                else y.clone()
+            )
             y = y.div_(scale)
         # ! `y` is already scaled during `_process_opts_centric_mod` by scaling `yw`
         y = self.y_quantizer.quantize(
@@ -572,10 +893,14 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
         return y.view(shape)
 
     def _process_xw_in_yx(self, w: torch.Tensor) -> torch.Tensor:
-        raise RuntimeError("The method `_process_xw_in_yx` should not be called in SmoothCalibrator.")
+        raise RuntimeError(
+            "The method `_process_xw_in_yx` should not be called in SmoothCalibrator."
+        )
 
     def _process_yw_in_yx(self, w: torch.Tensor) -> torch.Tensor:
-        raise RuntimeError("The method `_process_yw_in_yx` should not be called in SmoothCalibrator.")
+        raise RuntimeError(
+            "The method `_process_yw_in_yx` should not be called in SmoothCalibrator."
+        )
 
     def _process_wgts_centric_mod(
         self,
@@ -585,15 +910,23 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
         splits: list[int] | None = None,
         **kwargs,
     ) -> None:
-        if self.needs_w_quant_for_wgts and self.config.allow_low_rank and self.w_quantizer.is_enabled_low_rank():
+        if (
+            self.needs_w_quant_for_wgts
+            and self.config.allow_low_rank
+            and self.w_quantizer.is_enabled_low_rank()
+        ):
             assert len(wgts) == len(mods)
             for wgt in wgts:
                 if update_state_dict:
                     self._state_dict.append((wgt, wgt.data))
                 dtype = wgt.dtype
                 scale = self._reshape_scale(self.candidate, wgt.data, channels_dim=1)
-                wgt.data = wgt.data.to(dtype=self.develop_dtype).mul(scale).to(dtype=dtype)
-            input_packager = self.x_quantizer.get_input_packager() if self.needs_x_quant else None
+                wgt.data = (
+                    wgt.data.to(dtype=self.develop_dtype).mul(scale).to(dtype=dtype)
+                )
+            input_packager = (
+                self.x_quantizer.get_input_packager() if self.needs_x_quant else None
+            )
             for mod in mods:
                 self._hooks.append(
                     ActivationSmoother(
@@ -612,17 +945,23 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
                 wgts_splits, mods_splits = [wgts], [mods]
             for wgts_split, mods_split in zip(wgts_splits, mods_splits, strict=True):
                 for qwgt, lowr, wgt, mod in zip(
-                    *self.w_quantizer.quantize_with_low_rank(wgts_split, kernel=None, develop_dtype=self.develop_dtype),
+                    *self.w_quantizer.quantize_with_low_rank(
+                        wgts_split, kernel=None, develop_dtype=self.develop_dtype
+                    ),
                     wgts_split,
                     mods_split,
                     strict=True,
                 ):
                     wgt.data = qwgt.data
-                    self._hooks.append(lowr.as_hook(input_packager=input_packager).register(mod))
+                    self._hooks.append(
+                        lowr.as_hook(input_packager=input_packager).register(mod)
+                    )
                     if self.needs_x_quant_for_wgts:
                         self._hooks.append(self.x_quantizer.as_hook().register(mod))
         else:
-            super()._process_wgts_centric_mod(wgts=wgts, mods=mods, update_state_dict=update_state_dict, **kwargs)
+            super()._process_wgts_centric_mod(
+                wgts=wgts, mods=mods, update_state_dict=update_state_dict, **kwargs
+            )
 
     def _process_opts_centric_mod(
         self,
@@ -636,13 +975,27 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
         for w in x_wgts:
             if update_state_dict:
                 self._state_dict.append((w, w.data))
-            scale = self._reshape_scale(self.candidate, w, channels_dim=0, needs_reduction=False)
-            w.data = w.detach().data.to(dtype=self.develop_dtype).mul(scale).to(dtype=w.dtype)
+            scale = self._reshape_scale(
+                self.candidate, w, channels_dim=0, needs_reduction=False
+            )
+            w.data = (
+                w.detach()
+                .data.to(dtype=self.develop_dtype)
+                .mul(scale)
+                .to(dtype=w.dtype)
+            )
         for w in y_wgts:
             if update_state_dict:
                 self._state_dict.append((w, w.data))
-            scale = self._reshape_scale(self.candidate, w, channels_dim=0, needs_reduction=True)
-            w.data = w.detach().data.to(dtype=self.develop_dtype).div(scale).to(dtype=w.dtype)
+            scale = self._reshape_scale(
+                self.candidate, w, channels_dim=0, needs_reduction=True
+            )
+            w.data = (
+                w.detach()
+                .data.to(dtype=self.develop_dtype)
+                .div(scale)
+                .to(dtype=w.dtype)
+            )
         super()._process_opts_centric_mod(
             x_wgts=x_wgts,
             y_wgts=y_wgts,
@@ -694,16 +1047,24 @@ class SmoothCalibrator(SearchBasedCalibrator[SmoothCalibConfig, torch.Tensor]):
                         assert num_heads_per_group % num_head_repeats == 0
                         num_groups_per_head = 1
                         num_repeats = 1
-                        num_unqiue_heads_per_group = num_heads_per_group // num_head_repeats
+                        num_unqiue_heads_per_group = (
+                            num_heads_per_group // num_head_repeats
+                        )
                 num_uniques = num_unique_heads // num_unqiue_heads_per_group
             needs_reduction = needs_reduction and num_repeats > 1
 
             pos = torch.full((numel,), True, device=error[0][0].device)
             for b, e in zip(best_error, error, strict=True):
                 if needs_reduction:
-                    b = b.view(num_uniques, num_repeats, num_groups_per_head).sum(dim=1, keepdim=True)
-                    e = e.view(num_uniques, num_repeats, num_groups_per_head).sum(dim=1, keepdim=True)
-                    pos = pos & (e < b).expand(num_uniques, num_repeats, num_groups_per_head).reshape_as(pos)
+                    b = b.view(num_uniques, num_repeats, num_groups_per_head).sum(
+                        dim=1, keepdim=True
+                    )
+                    e = e.view(num_uniques, num_repeats, num_groups_per_head).sum(
+                        dim=1, keepdim=True
+                    )
+                    pos = pos & (e < b).expand(
+                        num_uniques, num_repeats, num_groups_per_head
+                    ).reshape_as(pos)
                 else:
                     pos = pos & (e < b)
             for b, e in zip(best_error, error, strict=True):
@@ -849,7 +1210,9 @@ class SmoothAttentionCalibrator(SmoothCalibrator):
         )
 
 
-def smooth_upscale_param(param: nn.Parameter, scale: torch.Tensor, channels_dim: int = 1) -> None:
+def smooth_upscale_param(
+    param: nn.Parameter, scale: torch.Tensor, channels_dim: int = 1
+) -> None:
     """In-place smooth the parameter by upscaling.
 
     Args:
@@ -869,7 +1232,9 @@ def smooth_upscale_param(param: nn.Parameter, scale: torch.Tensor, channels_dim:
     assert not param.data.isinf().any(), "Inf found in param when smoothing"
 
 
-def smooth_downscale_param(param: nn.Parameter, scale: torch.Tensor, channels_dim: int = 0) -> None:
+def smooth_downscale_param(
+    param: nn.Parameter, scale: torch.Tensor, channels_dim: int = 0
+) -> None:
     """In-place smooth the parameter by downscaling.
 
     Args:
@@ -911,7 +1276,9 @@ def convert_smooth_upscale_to_downscale(
     if num_heads > 1 and num_head_repeats > 1:
         head_channels = scale.numel() // num_heads
         num_unique_heads = num_heads // num_head_repeats
-        return scale.view(num_unique_heads, num_head_repeats, head_channels)[:, 0, :].reshape(-1)
+        return scale.view(num_unique_heads, num_head_repeats, head_channels)[
+            :, 0, :
+        ].reshape(-1)
     else:
         return scale
 
@@ -978,7 +1345,9 @@ def smooth_linear_modules(
         modules = [modules]
     extra_modules = [] if extra_modules is None else extra_modules
     if scale is None:
-        assert inputs is not None or eval_inputs is not None, "inputs or eval_inputs must be provided"
+        assert (
+            inputs is not None or eval_inputs is not None
+        ), "inputs or eval_inputs must be provided"
         scale = SmoothLinearCalibrator(
             config=config,
             weight_quantizer=weight_quantizer,
@@ -987,7 +1356,9 @@ def smooth_linear_modules(
             num_head_repeats=num_head_repeats,
             develop_dtype=develop_dtype,
         ).calibrate(
-            x_wgts=[module.weight for module in modules] if weights is None else weights,
+            x_wgts=(
+                [module.weight for module in modules] if weights is None else weights
+            ),
             x_acts=inputs,
             x_mods=modules,
             eval_inputs=eval_inputs,
@@ -1002,7 +1373,9 @@ def smooth_linear_modules(
         upscale = upscale.to(device=module.weight.device)
         smooth_upscale_param(module.weight, upscale, channels_dim=1)
     if prevs is not None:
-        downscale = convert_smooth_upscale_to_downscale(upscale, num_heads=num_heads, num_head_repeats=num_head_repeats)
+        downscale = convert_smooth_upscale_to_downscale(
+            upscale, num_heads=num_heads, num_head_repeats=num_head_repeats
+        )
         if isinstance(prevs, nn.Module):
             prevs = [prevs]
         for module in prevs:
@@ -1104,6 +1477,8 @@ def smooth_attention(
         torch.cuda.empty_cache()
     upscale = scale.to(device=q_proj.weight.device)
     smooth_upscale_param(q_proj.weight, upscale, channels_dim=0)
-    downscale = convert_smooth_upscale_to_downscale(upscale, num_heads=num_heads, num_head_repeats=num_head_repeats)
+    downscale = convert_smooth_upscale_to_downscale(
+        upscale, num_heads=num_heads, num_head_repeats=num_head_repeats
+    )
     smooth_downscale_param(k_proj.weight, downscale, channels_dim=0)
     return scale.to(device="cpu")
