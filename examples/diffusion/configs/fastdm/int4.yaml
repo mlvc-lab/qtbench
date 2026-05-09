@@ -1,0 +1,29 @@
+# FastDM-only INT4 weight preset.
+#
+# Block-wise AdaRound reconstruction with progressive (reverse) scheduling
+# and adaptive timestep grouping. No SVD, no smoothing.
+quant:
+  enable_fastdm: true
+  wgts:
+    dtype: sint4
+    zero_point: null
+  fastdm:
+    adaround:
+      enable: true
+      bits: 4
+      symmetric: false
+      block_loss_w: 0.01
+      weight_loss_w: 0.001
+      b_range_start: 20
+      b_range_end: 2
+    progressive:
+      direction: reverse
+      epoch_per_loop: 1
+      batch_size: 32
+    timestep_group:
+      enable: true
+      num_groups: 5
+      mode: adaptive
+      feature_dist_path: ""
+    tib:
+      enable: false

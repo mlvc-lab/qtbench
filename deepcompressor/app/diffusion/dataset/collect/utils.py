@@ -10,7 +10,9 @@ from diffusers.models.transformers import (
     FluxTransformer2DModel,
     PixArtTransformer2DModel,
     SanaTransformer2DModel,
+    Transformer2DModel,
 )
+from diffusers.models.transformers.dit_transformer_2d import DiTTransformer2DModel
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
 
 from deepcompressor.utils.common import tree_map, tree_split
@@ -54,9 +56,11 @@ class CollectHook:
             # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
             timesteps = timesteps.expand(sample.shape[0])
             input_kwargs["timestep"] = timesteps
-        elif isinstance(module, (PixArtTransformer2DModel, SanaTransformer2DModel)):
+        elif isinstance(module, (PixArtTransformer2DModel, SanaTransformer2DModel, FluxTransformer2DModel)):
             new_args.append(input_kwargs.pop("hidden_states"))
-        elif isinstance(module, FluxTransformer2DModel):
+        elif isinstance(module, DiTTransformer2DModel):
+            new_args.append(input_kwargs.pop("hidden_states"))
+        elif isinstance(module, Transformer2DModel) and getattr(module, "is_input_patches", False):
             new_args.append(input_kwargs.pop("hidden_states"))
         else:
             raise ValueError(f"Unknown model: {module}")

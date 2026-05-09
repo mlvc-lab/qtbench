@@ -1,0 +1,55 @@
+# FastDM LoRA-recipe: SVDQuant-style trained low-rank error compensation.
+#
+# Replaces SVDQuant's analytic SVD branch with an Adam-trained rank-32
+# branch driven by FastDM's progressive timestep schedule. The block
+# forward during training is RTN(W - b@a) @ x + b(a(x)) -- quantization
+# is fixed RTN, the branch absorbs the residual error.
+#
+# This file is *additive*: it only changes the LoRA-branch calibration
+# method. Stack on top of a model preset *and* a SVDQuant base preset
+# (svdquant/int4.yaml or svdquant/nvfp4.yaml etc.) so the rest of the
+# pipeline -- SmoothQuant, RTN bit-width, group sizes, activation quant
+# -- matches the SVDQuant baseline. Example:
+#
+#   python -m deepcompressor.app.diffusion.ptq \
+#       configs/model/pixart-sigma.yaml \
+#       configs/svdquant/int4.yaml \
+#       configs/fastdm/lora-svdq.yaml \
+#       --eval-benchmarks MJHQ --eval-num-samples 1024
+#
+# Notes:
+# * Training-quantizer is per-tensor min-max RTN; the deployed quantizer
+#   uses the bit-width / group sizes from the SVDQuant base preset.
+# * The qdiff calibration cache from `configs/collect/qdiff.yaml` is reused.
+# * The trained branches are written to cache.path.branch so the
+#   downstream weight-quantization pass picks them up in place of its
+#   own SVD calibration.
+# * `wgts.low_rank.exclusive: true` is required by the current trainer
+#   (one branch per Linear/Conv); shared branches across fused QKV are
+#   not yet supported by the FastDM-trained path.
+quant:
+  enable_fastdm: true
+  fastdm:
+    recipe: lowrank
+    lowrank:
+      enable: true
+      rank: 32
+      bits: 4
+      symmetric: false
+      lr: 1.0e-3
+      weight_decay: 0.0
+      ste_rtn: true
+    progressive:
+      direction: reverse
+      epoch_per_loop: 1
+      batch_size: 32
+    timestep_group:
+      enable: true
+      num_groups: 5
+      mode: adaptive
+      feature_dist_path: ""
+    tib:
+      enable: false
+  wgts:
+    low_rank:
+      exclusive: true

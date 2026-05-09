@@ -64,6 +64,134 @@ In this command,
 - If you would like to save quantized model checkpoint, please add `--save-model true` or `--save-model /PATH/TO/CHECKPOINT/DIR` in the command.
 
 
+### FastDM AdaRound calibration
+
+FastDM is a gradient-based block reconstruction calibrator (AdaRound +
+progressive timestep scheduling + adaptive timestep grouping) ported
+from [`Fast_DM_PTQ`](https://github.com/skku-khu/Fast_DM_PTQ). It is
+**additive**: enable it on its own for a pure AdaRound INT4 run, or
+stack it on top of SVDQuant.
+
+The same qdiff calibration cache prepared in Step 2 is reused.
+
+FastDM by itself:
+
+```bash
+python -m deepcompressor.app.diffusion.ptq \
+    configs/model/flux.1-schnell.yaml configs/fastdm/int4.yaml \
+    --eval-benchmarks MJHQ --eval-num-samples 1024
+```
+
+SVDQuant + FastDM stacked:
+
+```bash
+python -m deepcompressor.app.diffusion.ptq \
+    configs/model/flux.1-schnell.yaml \
+    configs/svdquant/int4.yaml configs/fastdm/int4-svdq.yaml \
+    --eval-benchmarks MJHQ --eval-num-samples 1024
+```
+
+Key knobs (see [`configs/fastdm/__default__.yaml`](configs/fastdm/__default__.yaml)
+and [`configs/__default__.yaml`](configs/__default__.yaml#L121)):
+
+- `quant.fastdm.adaround.enable` -- master toggle (default: `false`).
+- `quant.fastdm.adaround.bits` -- AdaRound bit-width (default: `4`).
+- `quant.fastdm.progressive.direction` -- `reverse` (default), `forward`,
+  or `null` for full-set single-loop.
+- `quant.fastdm.progressive.epoch_per_loop` -- Adam epochs per loop.
+- `quant.fastdm.timestep_group.{enable,num_groups,mode,feature_dist_path}`
+  -- adaptive vs uniform binning. Set `feature_dist_path` to a `.npy`
+  holding the precomputed adjacent-distance vector to use the DP-based
+  partitioner; otherwise FastDM falls back to uniform grouping.
+- `quant.fastdm.tib.enable` -- one-shot time-embedding reconstruction.
+  Currently only resolves on UNet2DConditionModel-style backbones; the
+  driver logs a warning and skips TIB on transformers (DiT/Flux/SD3).
+
+The learned per-layer rounding tensors are cached at
+`cache.fastdm = .../fastdm/.../fastdm.pt` and reloaded on subsequent runs,
+so re-evaluation does not re-optimise.
+
+
+### DiT-XL/2 ImageNet 256x256 (class-conditional)
+
+DiT (Peebles & Xie 2022) is a class-conditional latent diffusion
+transformer trained on ImageNet. Calibration mirrors the text-to-image
+flow but the prompts are integer ImageNet class labels (0-999) instead
+of text strings, and the pipeline is `diffusers.DiTPipeline`.
+
+#### Step 1: Calibration data collection
+
+The DiT calibration follows the **PTQ4DiT** ([NeurIPS 2024](https://arxiv.org/abs/2405.16005))
+recipe: 1000 ImageNet classes x 2 samples per class, generated at
+**CFG=1.5** (DiT paper default), captured at every denoising step
+(CFG-doubled inside the pipeline -> 4000 trajectories per step).
+
+```bash
+python -m deepcompressor.app.diffusion.dataset.collect.calib \
+    configs/model/dit-xl-2-256.yaml configs/collect/imagenet.yaml
+```
+
+- [`configs/model/dit-xl-2-256.yaml`](configs/model/dit-xl-2-256.yaml)
+  registers the pipeline as `dit-xl-2-256` (loads
+  `facebook/DiT-XL-2-256` via `DiTPipeline`), sets
+  `pipeline.task = "class-to-image"`, and pins `cfg-scale=1.5` to
+  match PTQ4DiT.
+- [`configs/collect/imagenet.yaml`](configs/collect/imagenet.yaml)
+  points at [`prompts/imagenet.yaml`](prompts/imagenet.yaml) which now
+  has **2000 entries** (1000 classes x 2 each, mirroring
+  `PTQ4DiT/get_calibration_set.py`). The collector samples
+  `num_samples=2000` by default and saves per-step pickles under
+  `datasets/torch.float16/dit-xl-2-256/ddim50-g1.5/imagenet/s2000/`.
+
+**Optional: exact PTQ4DiT single-blob format.** For users who want bit-
+identical PTQ4DiT data (single `.pt` containing
+`{xs, ts, y}` tensors of shape `[num_steps, 4000, ...]`):
+
+```bash
+python scripts/collect_dit_ptq4dit.py \
+    --out calib/imagenet_DiT-256_sample4000_50steps_allst.pt \
+    --num-classes 1000 --n-per-class 2 --num-steps 50 --cfg-scale 1.5
+```
+
+The blob is consumed by
+[`deepcompressor/app/diffusion/dataset/calib_ptq4dit.py`](../../deepcompressor/app/diffusion/dataset/calib_ptq4dit.py)
+which exposes PTQ4DiT's strided `cali_st x cali_n` subset selection
+and the conditional/null reorder.
+
+#### Step 2: Quantization
+
+INT4 weight-only with FastDM AdaRound block reconstruction:
+
+```bash
+python -m deepcompressor.app.diffusion.ptq \
+    configs/model/dit-xl-2-256.yaml configs/fastdm/int4-dit.yaml \
+    --skip-eval true
+```
+
+- [`configs/fastdm/int4-dit.yaml`](configs/fastdm/int4-dit.yaml) sets
+  `wgts.dtype: sint4` and enables FastDM with reverse progressive
+  scheduling and 5 uniform timestep groups. TIB is auto-skipped on
+  transformer backbones; the per-block AdaRound pass still runs.
+- `--skip-eval true` skips the standard MJHQ/COCO benchmarks (those
+  expect text prompts). Use ImageNet-256 FID against the official 50K
+  reference statistics out-of-band on the generated samples.
+
+To stack DiT calibration with smoothing or SVDQuant, append the
+relevant preset (e.g. `configs/svdquant/__default__.yaml`) before
+`configs/fastdm/int4-dit.yaml`.
+
+#### Notes
+
+- DiT has no text encoder, so the `text:` PTQ branch in `ptq.py` is a
+  no-op for this model.
+- The `class_labels=[int]` routing is wired in
+  [`dataset/collect/calib.py`](../../deepcompressor/app/diffusion/dataset/collect/calib.py)
+  and [`eval/config.py`](../../deepcompressor/app/diffusion/eval/config.py),
+  guarded by `task == "class-to-image"`.
+- For DiT-XL/2 at 512x512, swap `pipeline.name` to `dit-xl-2-512` and
+  set `eval.height: 512` / `eval.width: 512`.
+
+
 ## Deployment
 
 If you save the SVDQuant W4A4 quantized model checkpoint, you can easily to deploy quantized model with [`Nunchaku`](https://github.com/mit-han-lab/nunchaku) engine.

@@ -1,0 +1,13 @@
+# Calibration dataset for class-conditional ImageNet diffusion (DiT).
+# Each "prompt" is an integer class label in [0, 999]; the collect script
+# converts strings -> ints before invoking pipeline(class_labels=...).
+#
+# PTQ4DiT-aligned defaults:
+#   - 1000 classes x 2 samples per class = 2000 trajectories
+#   - cfg-scale=1.5 is set in configs/model/dit-xl-2-256.yaml
+#   - CFG doubling inside DiTPipeline yields 4000 effective trajectories per step.
+collect:
+  root: datasets
+  dataset_name: imagenet
+  data_path: prompts/imagenet.yaml
+  num_samples: 2000

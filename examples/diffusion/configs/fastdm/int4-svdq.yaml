@@ -1,0 +1,35 @@
+# FastDM stacked on top of SVDQuant.
+#
+# Use this with a SVDQuant model preset, e.g.:
+#   python -m deepcompressor.app.diffusion.ptq \
+#       configs/model/flux.1-schnell.yaml \
+#       configs/svdquant/int4.yaml \
+#       configs/fastdm/int4-svdq.yaml
+#
+# The pipeline order is: rotate -> smooth -> fastdm -> static weight
+# range calibration -> activation calibration. FastDM bakes its
+# AdaRound result into module.weight before the static weight pass runs,
+# so SVDQuant's low-rank branch and smoothing layer each see the
+# already-rounded weights.
+quant:
+  enable_fastdm: true
+  fastdm:
+    adaround:
+      enable: true
+      bits: 4
+      symmetric: false
+      block_loss_w: 0.01
+      weight_loss_w: 0.001
+      b_range_start: 20
+      b_range_end: 2
+    progressive:
+      direction: reverse
+      epoch_per_loop: 1
+      batch_size: 32
+    timestep_group:
+      enable: true
+      num_groups: 5
+      mode: adaptive
+      feature_dist_path: ""
+    tib:
+      enable: false

@@ -8,6 +8,7 @@ import torch
 from omniconfig import configclass
 
 from deepcompressor.calib.config import (
+    FastDmCalibConfig,
     QuantRotationConfig,
     SearchBasedCalibGranularity,
     SearchBasedCalibObjective,
@@ -48,6 +49,7 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
     calib: DiffusionCalibCacheLoaderConfig
     rotation: QuantRotationConfig | None = None
     smooth: SmoothTransfomerConfig | None = None
+    fastdm: FastDmCalibConfig | None = None
     develop_dtype: torch.dtype = field(
         default_factory=lambda s=torch.float32: eval_dtype(s, with_quant_dtype=False)
     )
@@ -59,6 +61,8 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
         if self.smooth is not None:
             if not self.smooth.enabled_proj and not self.smooth.enabled_attn:
                 self.smooth = None
+        if self.fastdm is not None and not self.fastdm.is_enabled():
+            self.fastdm = None
         if (
             self.enabled_smooth
             and self.smooth.enabled_proj
@@ -118,6 +122,11 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
     def enabled_smooth_attn(self) -> bool:
         """Whether to enable smooth quantization for attentions."""
         return self.enabled_smooth and self.smooth.enabled_attn
+
+    @property
+    def enabled_fastdm(self) -> bool:
+        """Whether to enable FastDM AdaRound block reconstruction."""
+        return self.fastdm is not None and self.fastdm.is_enabled()
 
     @property
     def needs_acts_quantizer_cache(self) -> bool:
@@ -197,11 +206,17 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
                     self.opts.calib_range.generate_dirnames(prefix="y.range")
                 )
             acts_dirpath = os.path.join("acts", *quant_names)
+        fastdm_dirpath = ""
+        if self.enabled_fastdm:
+            fastdm_names = list(quant_names)
+            fastdm_names.extend(self.fastdm.generate_dirnames(prefix="fastdm"))
+            fastdm_dirpath = os.path.join("fastdm", *fastdm_names)
         cache_dirpath = DiffusionQuantCacheConfig(
             smooth=smooth_dirpath,
             branch=branch_dirpath,
             wgts=wgts_dirpath,
             acts=acts_dirpath,
+            fastdm=fastdm_dirpath,
         ).simplify(type(self)._key_map)
         cache_dirpath = cache_dirpath.add_parent_dirs(*self.calib.generate_dirnames())
         cache_dirpath = cache_dirpath.add_parent_dirs(
@@ -503,6 +518,9 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
                     yrange_skips = yrange_skips - skips_map["y"]
                     yrange_skips.add("[y]")
                 yrange_name += ".skip.[{}]".format("+".join(sorted(yrange_skips)))
+        fastdm_name = ""
+        if self.enabled_fastdm:
+            fastdm_name = "-" + "-".join(self.fastdm.generate_dirnames(prefix=""))
         name = (
             skip_name
             + extra_name
@@ -514,6 +532,7 @@ class DiffusionQuantConfig(DiffusionModuleQuantizerConfig):
             + xrange_name
             + lzs_name
             + yrange_name
+            + fastdm_name
         )
         name = name[1:] if name else "default"
         name += f"-{self.calib.generate_dirnames()[0]}"

@@ -182,7 +182,13 @@ class DiffusionEvalConfig:
                 else:
                     pipeline_kwargs["control_image"] = controls
 
-            output = pipeline(prompts, generator=generators, **pipeline_kwargs)
+            if task == "class-to-image":
+                class_labels = [int(p) for p in prompts]
+                output = pipeline(
+                    class_labels=class_labels, generator=generators, **pipeline_kwargs
+                )
+            else:
+                output = pipeline(prompts, generator=generators, **pipeline_kwargs)
             images = output.images
             for filename, image in zip(filenames, images, strict=True):
                 image.save(os.path.join(dirpath, f"{filename}.png"))

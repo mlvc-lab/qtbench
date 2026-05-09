@@ -43,7 +43,7 @@ bs4 = "*"
 ftfy = "*"
 xformers = "*"
 clip = "*"
-image_reward = { git = "https://github.com/THUDM/ImageReward.git", branch = "main" }
+image_reward = "*"
 
 [[tool.poetry.source]]
 name = "pytorch_cu128"

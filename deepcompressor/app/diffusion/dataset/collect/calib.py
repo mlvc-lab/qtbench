@@ -69,7 +69,13 @@ def collect(config: DiffusionPtqRunConfig, dataset: datasets.Dataset):
             else:
                 pipeline_kwargs["control_image"] = controls
 
-        result_images = pipeline(prompts, generator=generators, **pipeline_kwargs).images
+        if task == "class-to-image":
+            class_labels = [int(p) for p in prompts]
+            result_images = pipeline(
+                class_labels=class_labels, generator=generators, **pipeline_kwargs
+            ).images
+        else:
+            result_images = pipeline(prompts, generator=generators, **pipeline_kwargs).images
         num_guidances = (len(caches) // batch_size) // config.eval.num_steps
         num_steps = len(caches) // (batch_size * num_guidances)
         assert (

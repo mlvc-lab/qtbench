@@ -27,6 +27,7 @@ from diffusers.models.embeddings import (
 )
 from diffusers.models.normalization import AdaLayerNormContinuous, AdaLayerNormSingle, AdaLayerNormZero
 from diffusers.models.resnet import Downsample2D, ResnetBlock2D, Upsample2D
+from diffusers.models.transformers.dit_transformer_2d import DiTTransformer2DModel
 from diffusers.models.transformers.pixart_transformer_2d import PixArtTransformer2DModel
 from diffusers.models.transformers.sana_transformer import GLUMBConv, SanaTransformer2DModel, SanaTransformerBlock
 from diffusers.models.transformers.transformer_2d import Transformer2DModel
@@ -47,6 +48,7 @@ from diffusers.models.unets.unet_2d_blocks import (
 )
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
 from diffusers.pipelines import (
+    DiTPipeline,
     FluxControlPipeline,
     FluxFillPipeline,
     FluxPipeline,
@@ -96,6 +98,7 @@ UNET_BLOCK_CLS = tp.Union[
 ]
 DIT_CLS = tp.Union[
     Transformer2DModel,
+    DiTTransformer2DModel,
     PixArtTransformer2DModel,
     SD3Transformer2DModel,
     FluxTransformer2DModel,
@@ -112,6 +115,7 @@ DIT_PIPELINE_CLS = tp.Union[
     FluxControlPipeline,
     FluxFillPipeline,
     SanaPipeline,
+    DiTPipeline,
 ]
 PIPELINE_CLS = tp.Union[UNET_PIPELINE_CLS, DIT_PIPELINE_CLS]
 
@@ -1586,12 +1590,12 @@ class DiTStruct(DiffusionModelStruct, DiffusionTransformerStruct):
 
     # region child modules
     input_embed: PatchEmbed
-    time_embed: AdaLayerNormSingle | CombinedTimestepTextProjEmbeddings | TimestepEmbedding
-    text_embed: PixArtAlphaTextProjection | nn.Linear
+    time_embed: AdaLayerNormSingle | CombinedTimestepTextProjEmbeddings | TimestepEmbedding | nn.Module | None
+    text_embed: PixArtAlphaTextProjection | nn.Linear | None
     norm_in: None = field(init=False, repr=False, default=None)
     proj_in: None = field(init=False, repr=False, default=None)
     norm_out: nn.LayerNorm | AdaLayerNormContinuous | None
-    proj_out: nn.Linear
+    proj_out: nn.Module | None
     # endregion
     # region relative names
     input_embed_rname: str
@@ -1720,6 +1724,28 @@ class DiTStruct(DiffusionModelStruct, DiffusionTransformerStruct):
                 text_embed, text_embed_rname = module.context_embedder, "context_embedder"
                 norm_out, norm_out_rname = module.norm_out, "norm_out"
                 proj_out, proj_out_rname = module.proj_out, "proj_out"
+                transformer_blocks, transformer_blocks_rname = module.transformer_blocks, "transformer_blocks"
+            elif isinstance(module, DiTTransformer2DModel) or (
+                isinstance(module, Transformer2DModel)
+                and getattr(module, "is_input_patches", False)
+            ):
+                input_embed, input_embed_rname = module.pos_embed, "pos_embed"
+                # DiT/Transformer2DModel-with-patches conditioning lives inside
+                # transformer_blocks[i].norm1.emb (AdaLayerNormZero); there is
+                # no top-level time/text embedder to expose here.
+                time_embed, time_embed_rname = None, ""
+                text_embed, text_embed_rname = None, ""
+                norm_out, norm_out_rname = module.norm_out, "norm_out"
+                if hasattr(module, "proj_out"):
+                    proj_out, proj_out_rname = module.proj_out, "proj_out"
+                else:
+                    proj_out = nn.ModuleDict(
+                        {
+                            "proj_out_1": module.proj_out_1,
+                            "proj_out_2": module.proj_out_2,
+                        }
+                    )
+                    proj_out_rname = "output_embed"
                 transformer_blocks, transformer_blocks_rname = module.transformer_blocks, "transformer_blocks"
             else:
                 raise NotImplementedError(f"Unsupported module type: {type(module)}")

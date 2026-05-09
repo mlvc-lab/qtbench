@@ -1,0 +1,53 @@
+# DiT-XL/2 256x256 ImageNet class-conditional model (Peebles & Xie 2022).
+# Pipeline: facebook/DiT-XL-2-256 via diffusers.DiTPipeline.
+#
+# Calibration follows the PTQ4DiT recipe (NeurIPS 2024) for DiT-XL/2:
+#   - cfg-scale = 1.5 (matches the DiT paper's default, not diffusers' 4.0)
+#   - calibration data = 1000 ImageNet classes x 2 samples per class -> 2000
+#     prompts; CFG-doubled inside the pipeline -> 4000 trajectories per
+#     denoising step, matching PTQ4DiT/get_calibration_set.py.
+#   - Two collection paths are available (pick one):
+#       (A) existing qdiff per-step pickle path:
+#             python -m deepcompressor.app.diffusion.dataset.collect.calib \
+#                 configs/model/dit-xl-2-256.yaml configs/collect/imagenet.yaml
+#           (uses prompts/imagenet.yaml -- now 2000 entries -- and writes
+#            per-step pickles consumed by both the static qdiff path and fastdm)
+#       (B) PTQ4DiT-format single-blob path:
+#             python scripts/collect_dit_ptq4dit.py \
+#                 --out calib/imagenet_DiT-256_sample4000_50steps_allst.pt
+#           (consumed by deepcompressor/app/diffusion/dataset/calib_ptq4dit.py
+#            with PTQ4DiT's strided cali_st x cali_n subset selection)
+pipeline:
+  name: dit-xl-2-256
+  dtype: torch.float16
+eval:
+  # DiTPipeline ignores height/width (fixed by checkpoint at 256x256), so leave them null.
+  num_steps: 50
+  guidance_scale: 1.5
+  protocol: ddim{num_steps}-g{guidance_scale}
+  batch_size_per_gpu: 16
+  benchmarks: []  # FID against ImageNet-256 stats happens out-of-band
+quant:
+  calib:
+    data: imagenet
+    batch_size: 16
+    # PTQ4DiT calibration scale: 1000 classes x 2 samples (sweep all 50 steps,
+    # CFG-doubled inside pipeline -> 4000 trajectories per step).
+    num_samples: 2000
+    # Override the default path template (which hardcodes s128) so the
+    # static range/fastdm loaders find the s2000 cache produced above.
+    path: datasets/{dtype}/{model}/{protocol}/{data}/s2000
+  wgts:
+    skips:
+    - embed
+    - transformer_proj_in
+    - transformer_proj_out
+    - transformer_norm
+    - transformer_add_norm
+  ipts:
+    skips:
+    - embed
+    - transformer_proj_in
+    - transformer_proj_out
+    - transformer_norm
+    - transformer_add_norm

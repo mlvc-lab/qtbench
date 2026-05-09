@@ -1,0 +1,37 @@
+# FastDM AdaRound preset for DiT-XL/2 ImageNet 256x256.
+#
+# Stack on top of the DiT model config:
+#   python -m deepcompressor.app.diffusion.ptq \
+#       configs/model/dit-xl-2-256.yaml configs/fastdm/int4-dit.yaml \
+#       --eval-skip-eval true
+#
+# Notes:
+# - DiT is a plain transformer (no UNet ResnetBlock2D), so TIB
+#   reconstruction is auto-skipped (logs a warning, the AdaRound block
+#   pass still runs).
+# - 50 DDIM steps x 128 calibration prompts = 6400 cached IO entries
+#   per block; reverse progressive scheduling with 5 timestep groups.
+quant:
+  enable_fastdm: true
+  wgts:
+    dtype: sint4
+    zero_point: null
+  fastdm:
+    adaround:
+      enable: true
+      bits: 4
+      symmetric: false
+      block_loss_w: 0.01
+      weight_loss_w: 0.001
+      b_range_start: 20
+      b_range_end: 2
+    progressive:
+      direction: reverse
+      epoch_per_loop: 1
+      batch_size: 32
+    timestep_group:
+      enable: true
+      num_groups: 5
+      mode: uniform   # adaptive needs a feature-distance vector; uniform is safe.
+    tib:
+      enable: false

@@ -27,13 +27,16 @@ class DiffusionQuantCacheConfig(BasePathConfig):
         wgts (`str`, *optional*, default=`""`):
             The weight quantizers state dict cache path.
         acts (`str`, *optional*, default=`""`):
-            The activation quantizers state dict cache path
+            The activation quantizers state dict cache path.
+        fastdm (`str`, *optional*, default=`""`):
+            The FastDM AdaRound alpha cache path.
     """
 
     smooth: str = ""
     branch: str = ""
     wgts: str = ""
     acts: str = ""
+    fastdm: str = ""
 
     @staticmethod
     def simplify_path(path: str, key_map: dict[str, set[str]]) -> str:

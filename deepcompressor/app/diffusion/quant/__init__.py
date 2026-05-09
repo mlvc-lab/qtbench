@@ -2,6 +2,7 @@
 
 from .activation import quantize_diffusion_activations
 from .config import DiffusionQuantCacheConfig, DiffusionQuantConfig
+from .fastdm import fastdm_diffusion
 from .quantizer import DiffusionActivationQuantizer, DiffusionWeightQuantizer
 from .rotate import rotate_diffusion
 from .smooth import smooth_diffusion

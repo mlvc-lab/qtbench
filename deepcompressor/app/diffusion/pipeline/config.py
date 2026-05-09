@@ -9,6 +9,7 @@ import torch
 from diffusers.pipelines import (
     AutoPipelineForText2Image,
     DiffusionPipeline,
+    DiTPipeline,
     FluxControlPipeline,
     FluxFillPipeline,
     SanaPipeline,
@@ -106,6 +107,9 @@ class DiffusionPipelineConfig:
             self.task = "depth-to-image"
         elif self.name == "flux.1-fill-dev":
             self.task = "inpainting"
+        elif self.name.startswith("dit"):
+            # DiT is class-conditional ImageNet diffusion (Peebles & Xie 2022).
+            self.task = "class-to-image"
 
     def build(
         self,
@@ -406,8 +410,10 @@ class DiffusionPipelineConfig:
                 path = "black-forest-labs/FLUX.1-Fill-dev"
             elif name == "flux.1-schnell":
                 path = "black-forest-labs/FLUX.1-schnell"
-            elif name == "dit":
+            elif name in ("dit", "dit-xl-2-256"):
                 path = "facebook/DiT-XL-2-256"
+            elif name == "dit-xl-2-512":
+                path = "facebook/DiT-XL-2-512"
             else:
                 raise ValueError(f"Path for {name} is not specified.")
         if name in ["flux.1-canny-dev", "flux.1-depth-dev"]:
@@ -423,14 +429,21 @@ class DiffusionPipelineConfig:
                 pipeline.text_encoder.to(dtype)
             else:
                 pipeline = SanaPipeline.from_pretrained(path, torch_dtype=dtype)
+        elif name.startswith("dit"):
+            # DiT is class-conditional and has no text encoder; AutoPipelineForText2Image
+            # would refuse to load it.
+            pipeline = DiTPipeline.from_pretrained(path, torch_dtype=dtype)
         else:
             pipeline = AutoPipelineForText2Image.from_pretrained(
                 path, torch_dtype=dtype
             )
         pipeline = pipeline.to(device)
         model = pipeline.unet if hasattr(pipeline, "unet") else pipeline.transformer
-        replace_fused_linear_with_concat_linear(model)
-        replace_up_block_conv_with_concat_conv(model)
+        if not name.startswith("dit"):
+            # The fused-linear / concat-conv patches target SDXL/Flux/Sana UNet
+            # internals; DiT's plain Transformer2DModel needs neither.
+            replace_fused_linear_with_concat_linear(model)
+            replace_up_block_conv_with_concat_conv(model)
         if shift_activations:
             shift_input_activations(model)
         return pipeline

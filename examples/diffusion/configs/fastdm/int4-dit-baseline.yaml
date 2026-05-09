@@ -1,0 +1,6 @@
+# Baseline INT4 weight-only preset for DiT-XL/2 -- no FastDM, no smoothing.
+# Used as the "qdiff" comparison point for FastDM in compare_dit_fid.py.
+quant:
+  wgts:
+    dtype: sint4
+    zero_point: null

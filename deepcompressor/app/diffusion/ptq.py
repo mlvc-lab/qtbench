@@ -17,9 +17,10 @@ from .config import (
     DiffusionQuantCacheConfig,
     DiffusionQuantConfig,
 )
-from .investigate import ActivationExtractor, ActivationModifier
+#from .investigate import ActivationExtractor, ActivationModifier
 from .nn.struct import DiffusionModelStruct
 from .quant import (
+    fastdm_diffusion,
     load_diffusion_weights_state_dict,
     quantize_diffusion_activations,
     quantize_diffusion_weights,
@@ -82,6 +83,7 @@ def ptq(  # noqa: C901
             branch=os.path.join(load_dirpath, "branch.pt"),
             wgts=os.path.join(load_dirpath, "wgts.pt"),
             acts=os.path.join(load_dirpath, "acts.pt"),
+            fastdm=os.path.join(load_dirpath, "fastdm.pt"),
         )
         load_model_path = os.path.join(load_dirpath, "model.pt")
         if os.path.exists(load_model_path):
@@ -110,6 +112,7 @@ def ptq(  # noqa: C901
             branch=os.path.join(save_dirpath, "branch.pt"),
             wgts=os.path.join(save_dirpath, "wgts.pt"),
             acts=os.path.join(save_dirpath, "acts.pt"),
+            fastdm=os.path.join(save_dirpath, "fastdm.pt"),
         )
     else:
         save_model = False
@@ -171,6 +174,54 @@ def ptq(  # noqa: C901
         extractor.extract_weights(suffix="_after_smooth")
 
         extractor.register_hooks()
+    # region fastdm block-reconstruction calibration
+    if quant_wgts and config.enabled_fastdm:
+        recipe_label = config.fastdm.recipe if config.fastdm is not None else "?"
+        logger.info(f"* Running FastDM block reconstruction (recipe={recipe_label})")
+        tools.logging.Formatter.indent_inc()
+        load_from = ""
+        if load_path and os.path.exists(load_path.fastdm):
+            load_from = load_path.fastdm
+        elif cache and cache.path.fastdm and os.path.exists(cache.path.fastdm):
+            load_from = cache.path.fastdm
+        if load_from:
+            logger.info(f"- Loading FastDM cache from {load_from}")
+            fastdm_cache = torch.load(load_from)
+            fastdm_diffusion(model, config, cache=fastdm_cache)
+        else:
+            logger.info(f"- Generating FastDM cache (recipe={recipe_label})")
+            fastdm_cache = fastdm_diffusion(model, config)
+            if cache and cache.path.fastdm:
+                logger.info(f"- Saving FastDM cache to {cache.path.fastdm}")
+                os.makedirs(cache.dirpath.fastdm, exist_ok=True)
+                torch.save(fastdm_cache, cache.path.fastdm)
+                load_from = cache.path.fastdm
+        # If the lowrank recipe trained per-module branches, route them
+        # into cache.path.branch so quantize_diffusion_weights consumes
+        # them in place of its own analytic SVD pass.
+        lowrank_branch_dict = (
+            fastdm_cache.pop("__branch_state_dict__", None)
+            if isinstance(fastdm_cache, dict)
+            else None
+        )
+        if lowrank_branch_dict is not None and cache and cache.path.branch:
+            logger.info(
+                f"- Saving FastDM-trained branches to {cache.path.branch}"
+            )
+            os.makedirs(cache.dirpath.branch, exist_ok=True)
+            torch.save(lowrank_branch_dict, cache.path.branch)
+        if save_path:
+            if not copy_on_save and load_from:
+                logger.info(f"- Linking FastDM alpha cache to {save_path.fastdm}")
+                os.symlink(os.path.relpath(load_from, save_dirpath), save_path.fastdm)
+            else:
+                logger.info(f"- Saving FastDM alpha cache to {save_path.fastdm}")
+                torch.save(fastdm_cache, save_path.fastdm)
+        del fastdm_cache
+        tools.logging.Formatter.indent_dec()
+        gc.collect()
+        torch.cuda.empty_cache()
+    # endregion
     # region collect original state dict
     if config.needs_acts_quantizer_cache:
         if load_path and os.path.exists(load_path.acts):

@@ -118,4 +118,34 @@ quant:
       beta: -1
       num_grids: 20
       skips: []
+  fastdm:
+    adaround:
+      enable: false
+      bits: 4
+      symmetric: false
+      weight_loss_w: 0.001
+      block_loss_w: 0.01
+      b_range_start: 20
+      b_range_end: 2
+      warmup: 0.0
+      decay_start: 0.0
+      p: 2.0
+    progressive:
+      direction: reverse
+      epoch_per_loop: 1
+      batch_size: 32
+    timestep_group:
+      enable: true
+      num_groups: 5
+      mode: adaptive
+      feature_dist_path: ""
+    tib:
+      enable: false
+      iters: 20000
+      lr: 4e-5
+    keep_gpu: true
+    log_loss_curves: false
+    loss_curve_dir: ""
+    activation_running_stat: false
+    activation_interval: 128
   develop_dtype: torch.float32
