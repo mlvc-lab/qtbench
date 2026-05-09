@@ -72,6 +72,20 @@ from [`Fast_DM_PTQ`](https://github.com/skku-khu/Fast_DM_PTQ). It is
 **additive**: enable it on its own for a pure AdaRound INT4 run, or
 stack it on top of SVDQuant.
 
+`config.fastdm.recipe` selects the optimisation target:
+
+- `recipe: adaround` (default) -- trains AdaRound rounding offsets
+  (`alpha`) on the model weights. The progressive/timestep-group
+  scheduling and the optional one-shot TIB pass apply here.
+- `recipe: lowrank` -- replaces SVDQuant's analytic SVD branch with an
+  Adam-trained rank-r `LowRankBranch` per `nn.Linear`/`nn.Conv*`. See
+  the next subsection.
+
+Both recipes share the same data flow, qdiff calibration cache, and
+progressive scheduler; only the trained tensors differ. The full
+pipeline is documented end-to-end with function-level entry points in
+[`fastdm.md`](fastdm.md).
+
 The same qdiff calibration cache prepared in Step 2 is reused.
 
 FastDM by itself:
@@ -110,6 +124,67 @@ and [`configs/__default__.yaml`](configs/__default__.yaml#L121)):
 The learned per-layer rounding tensors are cached at
 `cache.fastdm = .../fastdm/.../fastdm.pt` and reloaded on subsequent runs,
 so re-evaluation does not re-optimise.
+
+### FastDM LoRA-style branch calibration
+
+`recipe: lowrank` swaps AdaRound's learnable rounding for a
+**SVDQuant-style trained low-rank branch**. The block forward used
+during calibration is
+
+```text
+F.linear(x, RTN(W - b @ a)) + b(a(x))
+```
+
+where `(a, b)` are the rank-`r` factors of a `LowRankBranch` and
+`RTN(.)` is a fixed per-tensor min-max round-to-nearest simulator
+wrapped in a straight-through estimator. The host weight stays frozen;
+only `branch.{a,b}` are optimised. The branch is initialised by SVD on
+the analytic residual `W - RTN(W)`, so training starts from the
+SVDQuant operating point and refines it with FastDM's per-block
+output-MSE objective driven by the progressive timestep schedule.
+
+This recipe is **paired with SVDQuant**: the FastDM-trained branches
+replace SVDQuant's analytic SVD output but the rest of the pipeline
+(SmoothQuant, RTN bit-width, group sizes, activation quant) still
+comes from a SVDQuant base preset. After calibration, the trained
+branches are written to `cache.path.branch` so the downstream
+`quantize_diffusion_weights` consumes them in place of running its own
+SVD pass.
+
+```bash
+python -m deepcompressor.app.diffusion.ptq \
+    configs/model/pixart-sigma.yaml \
+    configs/svdquant/int4.yaml \
+    configs/fastdm/lora-svdq.yaml \
+    --eval-benchmarks MJHQ --eval-num-samples 1024
+```
+
+Key knobs (see [`configs/fastdm/lora-svdq.yaml`](configs/fastdm/lora-svdq.yaml)):
+
+- `quant.fastdm.recipe: lowrank` -- selects this recipe; the AdaRound
+  block is ignored.
+- `quant.fastdm.lowrank.enable` -- master toggle for the lowrank recipe.
+- `quant.fastdm.lowrank.rank` -- branch rank (default: `32`).
+- `quant.fastdm.lowrank.bits` / `quant.fastdm.lowrank.symmetric`
+  -- bit-width and range symmetry of the **training-time** RTN
+  simulator. The deployed quantizer still comes from the stacked
+  SVDQuant preset (`wgts.dtype`, group sizes, etc.).
+- `quant.fastdm.lowrank.lr` / `quant.fastdm.lowrank.weight_decay`
+  -- Adam optimiser settings for `branch.{a,b}`.
+- `quant.fastdm.lowrank.ste_rtn` -- whether the residual round is
+  wrapped in a straight-through estimator (default: `true`; set
+  `false` for debug only).
+- `quant.fastdm.tib.enable` is force-skipped under the lowrank recipe.
+- `wgts.low_rank.exclusive: true` is required: the trainer attaches one
+  branch per `Linear`/`Conv`, so shared branches across fused QKV are
+  not supported on this path.
+
+The trained branches are written to `cache.path.branch =
+.../<...>/branch.pt`. The FastDM cache file (`fastdm.pt`) under the
+lowrank recipe stores only a `__recipe__: "lowrank"` marker plus the
+flattened `{block.sub.<a|b>: tensor}` snapshot; on cache reload the
+function returns early and the downstream weight quantization step
+re-installs the branches from `branch.pt`.
 
 
 ### DiT-XL/2 ImageNet 256x256 (class-conditional)
